@@ -1,0 +1,59 @@
+# Model configuration for HDB resale price prediction
+
+# Feature engineering settings
+features:
+  categorical_encoding: "one-hot"  # Options: one-hot, label, target
+  scaling: "standard"  # Options: standard, minmax, robust, none
+  feature_selection:
+    enabled: true
+    method: "f_regression"  # Options: f_regression, mutual_info, recursive
+    k_best: 20  # Number of top features to select
+  
+  numerical_features:
+    - "floor_area_sqm"
+    - "lease_commence_date"
+    - "mid_storey"
+    - "Mall_Nearest_Distance"
+    - "Hawker_Nearest_Distance"
+    - "mrt_nearest_distance"
+    - "pri_sch_nearest_distance"
+    - "sec_sch_nearest_dist"
+  
+  categorical_features:
+    - "town"
+    - "flat_type"
+    - "storey_range"
+    - "flat_model"
+
+# Model hyperparameters
+models:
+  linear_regression:
+    fit_intercept: true
+    normalize: false
+  
+  ridge_regression:
+    alpha: 1.0
+    fit_intercept: true
+    normalize: false
+    max_iter: 1000
+    tol: 0.001
+    solver: "auto"
+  
+  lasso_regression:
+    alpha: 0.01
+    fit_intercept: true
+    normalize: false
+    max_iter: 1000
+    tol: 0.0001
+    warm_start: false
+    selection: "cyclic"
+
+# Model evaluation settings
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  metrics:
+    - "r2"
+    - "mse"
+    - "rmse"
+    - "mae"

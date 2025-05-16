@@ -1,0 +1,42 @@
+# App configuration for HDB resale price prediction application
+
+# Application settings
+app:
+  title: "HDB Resale Price Prediction"
+  icon: "🏙️"
+  version: "1.0.0"
+  description: "Interactive dashboard for predicting HDB resale prices in Singapore"
+
+# Page settings
+pages:
+  home:
+    title: "Home"
+    icon: "🏠"
+  
+  data_explorer:
+    title: "Data Explorer"
+    icon: "📊"
+  
+  prediction:
+    title: "Make Prediction"
+    icon: "🔮"
+  
+  model_insights:
+    title: "Model Insights"
+    icon: "📈"
+
+# Data settings
+data:
+  train_file: "train.csv"
+  test_file: "test.csv"
+  processed_dir: "processed"
+
+# Display settings
+ui:
+  theme: "light"
+  wide_mode: true
+  show_sidebar: true
+  maps:
+    center_lat: 1.35
+    center_lon: 103.82
+    default_zoom: 10.5
