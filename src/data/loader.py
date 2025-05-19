@@ -63,11 +63,10 @@ def get_data_paths(base_dir: Optional[str] = None) -> Dict[str, str]:
     │   │   └── test.csv
     │   └── processed/
     │       └── kaggle_hdb_df.csv
-    
-    Args:
+      Args:
         base_dir (str, optional): Base directory of the project. If None, the function
-            will attempt to detect the project root automatically by traversing up from
-            the current module's location.
+            will automatically use the directory three levels up from the current module's
+            location, assuming a standard project structure with src/data/loader.py.
         
     Returns:
         Dict[str, str]: Dictionary with keys 'train', 'test', and 'processed', each

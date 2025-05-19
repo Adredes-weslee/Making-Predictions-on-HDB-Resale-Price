@@ -199,7 +199,8 @@ def engineer_features(
     Returns:
         Tuple[ColumnTransformer, List[str], List[str]]: A tuple containing:
             - preprocessor: A scikit-learn ColumnTransformer for feature transformations
-            - numeric_features: List of numeric feature column names            - categorical_features: List of categorical feature column names
+            - numeric_features: List of numeric feature column names            
+            - categorical_features: List of categorical feature column names
             
     Example:
         >>> from src.data.preprocessing import preprocess_data
