@@ -79,11 +79,10 @@ def get_data_paths(base_dir: Optional[str] = None) -> Dict[str, str]:
     """
     if base_dir is None:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
     return {
         "train": os.path.join(base_dir, "data", "raw", "train.csv"),
         "test": os.path.join(base_dir, "data", "raw", "test.csv"),
-        "processed": os.path.join(base_dir, "data", "processed", "kaggle_hdb_df.csv"),
+        "processed": os.path.join(base_dir, "data", "processed"),
     }
 
 
@@ -192,5 +191,13 @@ def save_processed_data(df: pd.DataFrame, filename: str) -> None:
         >>> save_processed_data(processed_df, "processed_train_data.csv")
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_path = os.path.join(base_dir, "data", "processed", filename)
+    processed_dir = os.path.join(base_dir, "data", "processed")
+    
+    # Ensure the directory exists
+    os.makedirs(processed_dir, exist_ok=True)
+    
+    output_path = os.path.join(processed_dir, filename)
+    logger_msg = f"Processed data saved to: {output_path}"
+    
     df.to_csv(output_path, index=False)
+    return output_path

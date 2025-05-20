@@ -354,68 +354,6 @@ def plot_residuals(
     plt.tight_layout()
     
     return fig
-    # Generate predictions and calculate residuals
-    predictions = model.predict(X)
-    residuals = y - predictions
-    
-    # Create a figure with 4 subplots
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.tight_layout(pad=4)
-    
-    # Add a main title if provided
-    if title is None:
-        title = f"{model.model_type.upper()} Model Residual Analysis"
-    fig.suptitle(title, fontsize=16, y=1.05)
-    
-    # 1. Residuals vs. Predicted Values (top left)
-    axes[0, 0].scatter(predictions, residuals, alpha=0.5)
-    axes[0, 0].axhline(y=0, color='r', linestyle='-')
-    axes[0, 0].set_title('Residuals vs. Predicted Values')
-    axes[0, 0].set_xlabel('Predicted Values')
-    axes[0, 0].set_ylabel('Residuals')
-    
-    # Add a loess smoothing line to help identify patterns
-    try:
-        # Only add smoothing if there are sufficient data points
-        if len(predictions) > 10:
-            from statsmodels.nonparametric.smoothers_lowess import lowess
-            smoothed = lowess(residuals, predictions, frac=0.2)
-            axes[0, 0].plot(smoothed[:, 0], smoothed[:, 1], 'r-', linewidth=2)
-    except:
-        # Skip smoothing if it fails
-        pass
-    
-    # 2. Distribution of Residuals (top right)
-    sns.histplot(residuals, kde=True, ax=axes[0, 1])
-    axes[0, 1].axvline(x=0, color='r', linestyle='-')
-    axes[0, 1].set_title('Distribution of Residuals')
-    axes[0, 1].set_xlabel('Residual Value')
-    axes[0, 1].set_ylabel('Frequency')
-    
-    # Add text with residual statistics
-    stats_text = (f"Mean: {residuals.mean():.2f}\n"
-                 f"St. Dev: {residuals.std():.2f}\n"
-                 f"Skewness: {residuals.skew():.2f}")
-    axes[0, 1].text(0.95, 0.95, stats_text, transform=axes[0, 1].transAxes,
-                   ha='right', va='top', bbox=dict(facecolor='white', alpha=0.5))
-    
-    # 3. QQ Plot (bottom left)
-    from scipy import stats
-    stats.probplot(residuals, dist="norm", plot=axes[1, 0])
-    axes[1, 0].set_title('Q-Q Plot of Residuals')
-    
-    # 4. Residuals vs. Order (bottom right)
-    axes[1, 1].scatter(np.arange(len(residuals)), residuals, alpha=0.5)
-    axes[1, 1].axhline(y=0, color='r', linestyle='-')
-    axes[1, 1].set_title('Residuals vs. Order')
-    axes[1, 1].set_xlabel('Observation Order')
-    axes[1, 1].set_ylabel('Residuals')
-    
-    # Ensure the layout looks good
-    plt.tight_layout()
-    
-    return fig
-
 
 def plot_prediction_error(
     model: Model,

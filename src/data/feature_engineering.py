@@ -26,12 +26,22 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.feature_selection import SelectPercentile, mutual_info_regression
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, MinMaxScaler, RobustScaler
+from sklearn.feature_selection import SelectPercentile, SelectKBest, mutual_info_regression, f_regression
 from sklearn.experimental import enable_iterative_imputer  # Required import for IterativeImputer
 from sklearn.impute import SimpleImputer, IterativeImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+
+from src.utils.helpers import load_config
+
+# Import tqdm conditionally - will be used when show_progress=True
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Define a simple no-op tqdm replacement for when tqdm isn't available
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 
 def get_numeric_features(df: pd.DataFrame) -> List[str]:
@@ -98,7 +108,11 @@ def get_categorical_features(df: pd.DataFrame) -> List[str]:
 def create_preprocessor(
     numeric_features: List[str],
     categorical_features: List[str],
-    feature_selection_percentile: int = 50
+    feature_selection_percentile: int = 50,
+    scaling_method: str = "standard",
+    feature_selection_method: str = "mutual_info",
+    categorical_encoding: str = "one-hot",
+    config: dict = None
 ) -> ColumnTransformer:
     """Create a scikit-learn preprocessing pipeline for feature transformation.
     
@@ -122,7 +136,16 @@ def create_preprocessor(
         feature_selection_percentile (int, optional): Percentage of top numeric features
             to select based on mutual information score with the target. Lower values
             create more aggressive feature selection. Defaults to 50.
-              Returns:
+        scaling_method (str, optional): Method to use for scaling numeric features.
+            Options: "standard", "minmax", "robust", "none". Defaults to "standard".
+        feature_selection_method (str, optional): Method to use for feature selection.
+            Options: "mutual_info", "f_regression". Defaults to "mutual_info".
+        categorical_encoding (str, optional): Method for encoding categorical variables.
+            Options: "one-hot", "label", "target". Defaults to "one-hot".
+        config (dict, optional): Model configuration dictionary. If provided, overrides
+            other parameters with values from the configuration. Defaults to None.
+            
+    Returns:
         ColumnTransformer: A scikit-learn ColumnTransformer that can be used in a
             modeling pipeline to preprocess the data. Note that this transformer must be
             fitted on training data (with target values available) before it can be used
@@ -148,21 +171,51 @@ def create_preprocessor(
         ...     ('regressor', LinearRegression())
         ... ])
     """
-    # Numeric transformer with iterative imputer and standard scaling
-    numeric_transformer = Pipeline(
-        steps=[
-            ("imputer", IterativeImputer()),
-            ("scaler", StandardScaler())
-        ]
-    )
+    # Load configuration if not provided but override with function parameters if specified
+    if config is None:
+        config = load_config('model_config')
     
-    # Categorical transformer with one-hot encoding and feature selection
-    categorical_transformer = Pipeline(
-        steps=[
-            ("encoder", OneHotEncoder(drop='first', handle_unknown="infrequent_if_exist")),
-            ("selector", SelectPercentile(mutual_info_regression, percentile=feature_selection_percentile))
-        ]
-    )
+    # Get feature engineering settings from config, with function parameters taking precedence
+    features_config = config.get('features', {})
+    
+    # Use function parameters if provided, otherwise use config values with defaults
+    scaling_method = scaling_method or features_config.get('scaling', 'standard')
+    feature_selection_method = feature_selection_method or features_config.get('feature_selection', {}).get('method', 'f_regression')
+    categorical_encoding = categorical_encoding or features_config.get('categorical_encoding', 'one-hot')
+    
+    # Select the appropriate scaler based on the scaling method
+    if scaling_method == 'minmax':
+        scaler = MinMaxScaler()
+    elif scaling_method == 'robust':
+        scaler = RobustScaler()
+    elif scaling_method == 'none':
+        scaler = None
+    else:  # default to standard scaling
+        scaler = StandardScaler()
+    
+    # Select the feature selection method
+    if feature_selection_method == 'f_regression':
+        feature_selector = f_regression
+    else:  # default to mutual information
+        feature_selector = mutual_info_regression
+    
+    # Numeric transformer pipeline
+    numeric_steps = [("imputer", IterativeImputer())]
+    if scaler is not None:
+        numeric_steps.append(("scaler", scaler))
+    
+    numeric_transformer = Pipeline(steps=numeric_steps)
+    
+    # Categorical transformer with the appropriate encoding
+    categorical_steps = []
+    if categorical_encoding == 'one-hot':
+        categorical_steps.append(("encoder", OneHotEncoder(drop='first', handle_unknown="infrequent_if_exist")))
+    
+    # Add feature selection if enabled
+    if features_config.get('feature_selection', {}).get('enabled', True):
+        categorical_steps.append(("selector", SelectPercentile(feature_selector, percentile=feature_selection_percentile)))
+    
+    categorical_transformer = Pipeline(steps=categorical_steps)
     
     # Column transformer
     preprocessor = ColumnTransformer(
@@ -170,15 +223,21 @@ def create_preprocessor(
             ("num", numeric_transformer, numeric_features),
             ("cat", categorical_transformer, categorical_features)
         ],
-        n_jobs=-1
+        n_jobs=-1,
+        sparse_threshold=0.3  # Make it less likely to return sparse matrices
     )
+    
+    # Add verbose debug information to the preprocessor
+    preprocessor.verbose = True
     
     return preprocessor
 
 
 def engineer_features(
     df: pd.DataFrame,
-    feature_selection_percentile: int = 50
+    feature_selection_percentile: int = 50,
+    show_progress: bool = False,
+    config: dict = None
 ) -> Tuple[ColumnTransformer, List[str], List[str]]:
     """Engineer features from a preprocessed HDB resale dataframe.
     
@@ -196,6 +255,8 @@ def engineer_features(
         feature_selection_percentile (int, optional): Percentile of features to keep
             based on their mutual information scores with the target. Lower values
             result in more aggressive feature reduction. Defaults to 50.
+        show_progress (bool, optional): Whether to display progress bars during processing.
+            Defaults to False.
         
     Returns:
         Tuple[ColumnTransformer, List[str], List[str]]: A tuple containing:
@@ -216,16 +277,60 @@ def engineer_features(
         ...     ('preprocessor', preprocessor),
         ...     ('regressor', LinearRegression())
         ... ])
-    """
-    # Get feature lists
-    numeric_features = get_numeric_features(df)
-    categorical_features = get_categorical_features(df)
+    """    # Load configuration if not provided
+    if config is None:
+        config = load_config('model_config')
     
-    # Create column transformer
+    # Set up progress tracking if requested
+    if show_progress:
+        try:
+            steps = ['Identify numeric features', 'Identify categorical features', 'Create preprocessor']
+            pbar = tqdm(steps, desc="Feature engineering steps")
+        except Exception as e:
+            print(f"Warning: Could not initialize progress bar: {e}")
+            show_progress = False
+    
+    # Use numeric and categorical features from config if provided, otherwise infer them
+    features_config = config.get('features', {})
+    config_numeric_features = features_config.get('numerical_features')
+    config_categorical_features = features_config.get('categorical_features')
+    
+    if config_numeric_features and all(feat in df.columns for feat in config_numeric_features):
+        numeric_features = config_numeric_features
+    else:
+        numeric_features = get_numeric_features(df)
+    
+    if show_progress:
+        pbar.update(1)
+        pbar.set_description("Identify categorical features")
+    
+    if config_categorical_features and all(feat in df.columns for feat in config_categorical_features):
+        categorical_features = config_categorical_features
+    else:
+        categorical_features = get_categorical_features(df)
+    
+    if show_progress:
+        pbar.update(1)
+        pbar.set_description("Create preprocessor")
+    
+    # Get feature engineering settings from config
+    scaling_method = features_config.get('scaling', 'standard')
+    categorical_encoding = features_config.get('categorical_encoding', 'one-hot')
+    feature_selection_method = features_config.get('feature_selection', {}).get('method', 'f_regression')
+    
+    # Create column transformer with configuration
     preprocessor = create_preprocessor(
         numeric_features, 
         categorical_features, 
-        feature_selection_percentile
+        feature_selection_percentile=feature_selection_percentile,
+        scaling_method=scaling_method,
+        feature_selection_method=feature_selection_method,
+        categorical_encoding=categorical_encoding,
+        config=config
     )
+    
+    if show_progress:
+        pbar.update(1)
+        pbar.close()
     
     return preprocessor, numeric_features, categorical_features
