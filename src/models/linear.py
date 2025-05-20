@@ -30,6 +30,7 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso, RidgeCV, LassoC
 from sklearn.pipeline import Pipeline
 
 from src.models.base import Model
+from src.utils.helpers import load_config
 
 
 class LinearRegressionModel(Model):
@@ -52,16 +53,20 @@ class LinearRegressionModel(Model):
         preprocessor (ColumnTransformer): Data preprocessing pipeline.
         pipeline (Pipeline): Complete model pipeline including preprocessing and regression.
         
-    Example:        >>> model = LinearRegressionModel(feature_selection_percentile=75)
+    Example:
+        >>> model = LinearRegressionModel(feature_selection_percentile=75)
         >>> model.train(X_train, y_train)
         >>> r2_score = model.evaluate(X_test, y_test)["r2_score"]
     """
     
     def __init__(
         self,
-        feature_selection_percentile: int = 50,
-        random_state: int = 123,
-        model_dir: str = None
+        feature_selection_percentile: int = None,
+        random_state: int = None,
+        model_dir: str = None,
+        fit_intercept: bool = None,
+        normalize: bool = None,
+        config: dict = None
     ):
         """Initialize a linear regression model with specified configuration.
         
@@ -71,18 +76,44 @@ class LinearRegressionModel(Model):
         Args:
             feature_selection_percentile (int, optional): Percentage of features to
                 keep based on mutual information with the target variable. Lower values
-                produce more aggressive feature selection. Defaults to 50.
+                produce more aggressive feature selection. Defaults to None, uses config value.
             random_state (int, optional): Seed for random number generation to ensure
-                reproducibility of results. Defaults to 123.
+                reproducibility of results. Defaults to None, uses config value.
             model_dir (str, optional): Directory path where model artifacts (fitted
                 model, preprocessor, metrics) will be saved. If None, uses the default
                 directory from the base Model class. Defaults to None.
+            fit_intercept (bool, optional): Whether to calculate the intercept for this model.
+                Defaults to None, uses config value.
+            normalize (bool, optional): Whether to normalize features. 
+                Defaults to None, uses config value.
+            config (dict, optional): Model configuration dictionary. If provided, overrides
+                other parameters with values from configuration. Defaults to None.
                 
         Note:
             The actual model pipeline isn't created until needed, but the configuration
             is stored for later use. This lazy initialization pattern helps with
             serialization and allows changing parameters before training.
-        """        
+        """
+        # Load configuration if not provided
+        if config is None:
+            config = load_config('model_config')
+        
+        # Get evaluation settings
+        eval_config = config.get('evaluation', {})
+        if random_state is None:
+            random_state = eval_config.get('random_state', 42)
+            
+        # Get feature selection settings
+        feature_config = config.get('features', {}).get('feature_selection', {})
+        if feature_selection_percentile is None:
+            feature_selection_percentile = 50  # Default
+          # Get model specific settings
+        model_config = config.get('models', {}).get('linear_regression', {})
+        self.fit_intercept = fit_intercept if fit_intercept is not None else model_config.get('fit_intercept', True)
+        # The 'normalize' parameter is deprecated in scikit-learn and will be removed
+        # It's kept here for config compatibility but won't be used
+        self._normalize_deprecated = normalize if normalize is not None else model_config.get('normalize', False)
+        
         super().__init__(
             model_type="lr",
             feature_selection_percentile=feature_selection_percentile,
@@ -96,7 +127,7 @@ class LinearRegressionModel(Model):
         This method is called internally by the base Model class to create
         the model's processing pipeline. It combines the preprocessor (which
         handles feature transformations) with the LinearRegression estimator
-        configured to use all available CPU cores.
+        configured using the parameters from the configuration file.
         
         The method is overridden from the base Model class to provide the specific
         estimator configuration for standard linear regression.
@@ -108,11 +139,14 @@ class LinearRegressionModel(Model):
         Note:
             This is a protected method called by the base class and not typically
             invoked directly by users of the class.
-        """
+        """        
         return Pipeline(
             steps=[
                 ("preprocessor", self.preprocessor), 
-                ("regressor", LinearRegression(n_jobs=-1))
+                ("regressor", LinearRegression(
+                    fit_intercept=self.fit_intercept,
+                    n_jobs=-1
+                ))
             ]
         )
 
@@ -145,43 +179,76 @@ class RidgeRegressionModel(Model):
         >>> print(f"Best alpha: {model.best_alpha}")
         >>> r2_score = model.evaluate(X_test, y_test)["r2_score"]
     """
-    
     def __init__(
         self,
-        feature_selection_percentile: int = 50,
-        alphas: np.ndarray = None,
-        cv: int = 5,
-        random_state: int = 123,
-        model_dir: str = None
+        feature_selection_percentile: int = None,
+        alpha: float = None,
+        fit_intercept: bool = None,
+        normalize: bool = None,
+        max_iter: int = None,
+        tol: float = None,
+        solver: str = None,
+        random_state: int = None,
+        model_dir: str = None,
+        config: dict = None
     ):
         """Initialize a ridge regression model with specified configuration.
         
-        This constructor configures a Ridge regression model with cross-validation
-        for automatic selection of the optimal regularization strength (alpha).
-        It sets up the model parameters and initializes the base Model class.
+        This constructor configures a Ridge regression model with configurable
+        regularization strength (alpha). It sets up the model parameters and 
+        initializes the base Model class.
         
         Args:
             feature_selection_percentile (int, optional): Percentage of features to
                 keep based on mutual information with the target variable. Lower values
-                produce more aggressive feature selection. Defaults to 50.
-            alphas (np.ndarray, optional): Array of alpha values to try during
-                cross-validation. If None, uses a default range of values appropriate
-                for most HDB price prediction tasks. Defaults to None.
-            cv (int, optional): Number of cross-validation folds to use when selecting
-                the optimal alpha value. Higher values give more accurate estimates but
-                increase computation time. Defaults to 5.
+                produce more aggressive feature selection. Defaults to None, uses config value.
+            alpha (float, optional): Regularization strength parameter. Larger values
+                specify stronger regularization. Defaults to None, uses config value.
+            fit_intercept (bool, optional): Whether to calculate the intercept for this model.
+                Defaults to None, uses config value.
+            normalize (bool, optional): Whether to normalize features.
+                Defaults to None, uses config value.
+            max_iter (int, optional): Maximum number of iterations for solver.
+                Defaults to None, uses config value.
+            tol (float, optional): Tolerance for stopping criteria.
+                Defaults to None, uses config value.
+            solver (str, optional): Solver to use for the optimization.
+                Defaults to None, uses config value.
             random_state (int, optional): Seed for random number generation to ensure
-                reproducibility of results. Defaults to 123.
+                reproducibility of results. Defaults to None, uses config value.
             model_dir (str, optional): Directory path where model artifacts (fitted
                 model, preprocessor, metrics) will be saved. If None, uses the default
                 directory from the base Model class. Defaults to None.
+            config (dict, optional): Model configuration dictionary. If provided, overrides
+                other parameters with values from configuration. Defaults to None.
                 
         Note:
             Ridge regression adds L2 regularization to linear regression, which helps
             prevent overfitting when there are many features or multicollinearity.
         """
-        if alphas is None:
-            alphas = np.logspace(-3, 3, 10)
+        # Load configuration if not provided
+        if config is None:
+            config = load_config('model_config')
+        
+        # Get evaluation settings
+        eval_config = config.get('evaluation', {})
+        if random_state is None:
+            random_state = eval_config.get('random_state', 42)
+            
+        # Get feature selection settings
+        feature_config = config.get('features', {}).get('feature_selection', {})
+        if feature_selection_percentile is None:
+            feature_selection_percentile = 50  # Default
+        
+        # Get model specific settings
+        model_config = config.get('models', {}).get('ridge_regression', {})
+        self.alpha = alpha if alpha is not None else model_config.get('alpha', 1.0)
+        self.fit_intercept = fit_intercept if fit_intercept is not None else model_config.get('fit_intercept', True)
+        # The 'normalize' parameter is deprecated in scikit-learn and will be removed
+        self._normalize_deprecated = normalize if normalize is not None else model_config.get('normalize', False)
+        self.max_iter = max_iter if max_iter is not None else model_config.get('max_iter', 1000)
+        self.tol = tol if tol is not None else model_config.get('tol', 0.001)
+        self.solver = solver if solver is not None else model_config.get('solver', 'auto')
             
         super().__init__(
             model_type="ridge",
@@ -189,21 +256,16 @@ class RidgeRegressionModel(Model):
             random_state=random_state,
             model_dir=model_dir
         )
-        
-        self.alphas = alphas
-        self.cv = cv
-    
     def _create_pipeline(self) -> Pipeline:
         """Create the scikit-learn pipeline for the ridge regression model.
         
         This method is called internally by the base Model class to create
         the model's processing pipeline. It combines the preprocessor (which
-        handles feature transformations) with the RidgeCV estimator that
-        automatically selects the optimal regularization strength (alpha)
-        from the provided range using cross-validation.
+        handles feature transformations) with the Ridge estimator that uses
+        the configured hyperparameters from the model_config.yaml file.
         
         The method is overridden from the base Model class to provide the specific
-        estimator configuration for ridge regression with cross-validation.
+        estimator configuration for ridge regression.
         
         Returns:
             Pipeline: A scikit-learn Pipeline with preprocessing and ridge regression
@@ -216,10 +278,14 @@ class RidgeRegressionModel(Model):
         return Pipeline(
             steps=[
                 ("preprocessor", self.preprocessor), 
-                ("regressor", RidgeCV(
-                    alphas=self.alphas,
-                    cv=self.cv,
-                    scoring='neg_mean_squared_error'
+                ("regressor", Ridge(
+                    alpha=self.alpha,
+                    fit_intercept=self.fit_intercept,
+                    # normalize parameter removed as it's deprecated in scikit-learn
+                    max_iter=self.max_iter,
+                    tol=self.tol,
+                    solver=self.solver,
+                    random_state=self.random_state
                 ))
             ]
         )
@@ -256,87 +322,124 @@ class LassoRegressionModel(Model):
     """Lasso regression model with L1 regularization for HDB price prediction.
     
     This class implements a Lasso regression model for predicting HDB resale prices.
-    It extends the base Model class and configures a scikit-learn LassoCV estimator
+    It extends the base Model class and configures a scikit-learn Lasso estimator
     within a pipeline that includes preprocessing steps.
     
     Lasso regression adds an L1 penalty (sum of absolute coefficients) to the loss
     function, which helps with feature selection by potentially setting some coefficients
-    to exactly zero. The optimal regularization strength (alpha) is selected
-    automatically using cross-validation.
+    to exactly zero.
     
     Attributes:
         feature_selection_percentile (int): Percentage of features to keep based
             on mutual information scores.
-        n_alphas (int): Number of alpha values to try in cross-validation.
-        cv (int): Number of cross-validation folds.
+        alpha (float): L1 regularization strength parameter.
+        fit_intercept (bool): Whether to fit the intercept.
+        normalize (bool): Whether to normalize the data.
+        max_iter (int): Maximum number of iterations.
+        tol (float): Tolerance for stopping criteria.
+        warm_start (bool): Whether to reuse previous solution.
+        selection (str): Feature selection method ('cyclic' or 'random').
         random_state (int): Random seed for reproducibility.
         model_dir (str, optional): Directory for saving/loading model artifacts.
-        preprocessor (ColumnTransformer): Data preprocessing pipeline.
-        pipeline (Pipeline): Complete model pipeline including preprocessing and regression.
         
     Example:
-        >>> model = LassoRegressionModel(feature_selection_percentile=75)
+        >>> model = LassoRegressionModel()
         >>> model.fit(X_train, y_train)
-        >>> print(f"Best alpha: {model.best_alpha}")
         >>> r2_score = model.evaluate(X_test, y_test)["r2_score"]
         >>> print(f"Non-zero features: {model.n_nonzero_features}")
     """
     
     def __init__(
         self,
-        feature_selection_percentile: int = 50,
-        n_alphas: int = 100,
-        cv: int = 5,
-        random_state: int = 123,
-        model_dir: str = None
+        feature_selection_percentile: int = None,
+        alpha: float = None,
+        fit_intercept: bool = None,
+        normalize: bool = None,
+        max_iter: int = None,
+        tol: float = None,
+        warm_start: bool = None,
+        selection: str = None,
+        random_state: int = None,
+        model_dir: str = None,
+        config: dict = None
     ):
         """Initialize a lasso regression model with specified configuration.
         
-        This constructor configures a Lasso regression model with cross-validation
-        for automatic selection of the optimal regularization strength (alpha).
-        It sets up the model parameters and initializes the base Model class.
+        This constructor configures a Lasso regression model with parameters loaded
+        from the configuration file. It sets up the model parameters and initializes 
+        the base Model class.
         
         Args:
             feature_selection_percentile (int, optional): Percentage of features to
                 keep based on mutual information with the target variable. Lower values
-                produce more aggressive feature selection. Defaults to 50.
-            n_alphas (int, optional): Number of alpha values to try during cross-validation.
-                Higher values provide finer-grained optimization but increase computation time.
-                Defaults to 100.
-            cv (int, optional): Number of cross-validation folds to use when selecting
-                the optimal alpha value. Higher values give more accurate estimates but
-                increase computation time. Defaults to 5.
+                produce more aggressive feature selection. Defaults to None, uses config value.
+            alpha (float, optional): Regularization strength parameter. Larger values specify
+                stronger regularization. Defaults to None, uses config value.
+            fit_intercept (bool, optional): Whether to calculate the intercept for this model.
+                Defaults to None, uses config value.
+            normalize (bool, optional): Whether to normalize features.
+                Defaults to None, uses config value.
+            max_iter (int, optional): Maximum number of iterations for solver. 
+                Defaults to None, uses config value.
+            tol (float, optional): Tolerance for stopping criteria. Defaults to None, uses config value.
+            warm_start (bool, optional): Whether to reuse previous solution. 
+                Defaults to None, uses config value.
+            selection (str, optional): Selection strategy among 'cyclic', 'random'. 
+                Defaults to None, uses config value.
             random_state (int, optional): Seed for random number generation to ensure
-                reproducibility of results. Defaults to 123.
+                reproducibility of results. Defaults to None, uses config value.
             model_dir (str, optional): Directory path where model artifacts (fitted
                 model, preprocessor, metrics) will be saved. If None, uses the default
                 directory from the base Model class. Defaults to None.
+            config (dict, optional): Model configuration dictionary. If provided, overrides
+                other parameters with values from configuration. Defaults to None.
                 
         Note:
             Lasso regression adds L1 regularization to linear regression, which helps
             with feature selection by potentially setting some coefficients to exactly zero.
         """
+        # Load configuration if not provided
+        if config is None:
+            config = load_config('model_config')
+        
+        # Get evaluation settings
+        eval_config = config.get('evaluation', {})
+        if random_state is None:
+            random_state = eval_config.get('random_state', 42)
+            
+        # Get feature selection settings
+        feature_config = config.get('features', {}).get('feature_selection', {})
+        if feature_selection_percentile is None:
+            feature_selection_percentile = 50  # Default
+        
+        # Get model specific settings
+        model_config = config.get('models', {}).get('lasso_regression', {})
+        self.alpha = alpha if alpha is not None else model_config.get('alpha', 0.01)
+        self.fit_intercept = fit_intercept if fit_intercept is not None else model_config.get('fit_intercept', True)
+        # The 'normalize' parameter is deprecated in scikit-learn and will be removed
+        self._normalize_deprecated = normalize if normalize is not None else model_config.get('normalize', False)
+        self.max_iter = max_iter if max_iter is not None else model_config.get('max_iter', 1000)
+        self.tol = tol if tol is not None else model_config.get('tol', 0.0001)
+        self.warm_start = warm_start if warm_start is not None else model_config.get('warm_start', False)
+        self.selection = selection if selection is not None else model_config.get('selection', 'cyclic')
+        
         super().__init__(
             model_type="lasso",
             feature_selection_percentile=feature_selection_percentile,
             random_state=random_state,
             model_dir=model_dir
         )
-        
-        self.n_alphas = n_alphas
-        self.cv = cv
     
     def _create_pipeline(self) -> Pipeline:
         """Create the scikit-learn pipeline for the lasso regression model.
         
         This method is called internally by the base Model class to create
         the model's processing pipeline. It combines the preprocessor (which
-        handles feature transformations) with the LassoCV estimator that
-        automatically selects the optimal regularization strength (alpha)
-        using cross-validation.
+        handles feature transformations) with the Lasso estimator that uses
+        the configured hyperparameters from the model_config.yaml file.
         
         The method is overridden from the base Model class to provide the specific
-        estimator configuration for lasso regression with cross-validation.
+        estimator configuration for lasso regression.
         
         Returns:
             Pipeline: A scikit-learn Pipeline with preprocessing and lasso regression
@@ -349,41 +452,36 @@ class LassoRegressionModel(Model):
         return Pipeline(
             steps=[
                 ("preprocessor", self.preprocessor), 
-                ("regressor", LassoCV(
-                    n_alphas=self.n_alphas,
-                    cv=self.cv,
-                    random_state=self.random_state,
-                    n_jobs=-1
+                ("regressor", Lasso(
+                    alpha=self.alpha,
+                    fit_intercept=self.fit_intercept,
+                    # normalize parameter removed as it's deprecated in scikit-learn
+                    max_iter=self.max_iter,
+                    tol=self.tol,
+                    warm_start=self.warm_start,
+                    selection=self.selection,
+                    random_state=self.random_state
                 ))
             ]
         )
-        
+    
     @property
-    def best_alpha(self) -> float:
-        """Get the optimal alpha value selected through cross-validation.
+    def alpha_value(self) -> float:
+        """Get the alpha value used in the model.
         
-        This property provides access to the optimal regularization strength (alpha)
-        that was selected by LassoCV during training through cross-validation.
-        The alpha value represents the strength of the L1 penalty; higher values
-        create simpler models with more coefficients set to zero.
+        This property provides access to the regularization strength (alpha)
+        that was used for the Lasso model. The alpha value represents the 
+        strength of the L1 penalty; higher values create simpler models 
+        with more coefficients set to zero.
         
         Returns:
-            float: The optimal alpha value selected during model training.
-            
-        Raises:
-            RuntimeError: If accessed before the model has been trained.
+            float: The alpha value configured for this model.
             
         Example:
             >>> model = LassoRegressionModel()
-            >>> model.fit(X_train, y_train)
-            >>> print(f"Best alpha selected: {model.best_alpha:.6f}")
+            >>> print(f"Alpha value: {model.alpha_value:.6f}")
         """
-        if self.model is None:
-            raise RuntimeError("Model has not been trained yet. Call fit() first.")
-            
-        # Get the regressor from the pipeline
-        lasso_cv = self.model.named_steps['regressor']
-        return lasso_cv.alpha_
+        return self.alpha
         
     @property
     def n_nonzero_features(self) -> int:
@@ -392,10 +490,10 @@ class LassoRegressionModel(Model):
         This property returns the count of features that have non-zero coefficients
         in the trained Lasso model. It provides insight into how aggressive the
         feature selection has been - fewer non-zero features indicates stronger
-        regularization and a simpler model.
+        regularization that has eliminated more features.
         
         Returns:
-            int: The number of features with non-zero coefficients.
+            int: Number of feature coefficients that are non-zero.
             
         Raises:
             RuntimeError: If accessed before the model has been trained.
@@ -403,12 +501,13 @@ class LassoRegressionModel(Model):
         Example:
             >>> model = LassoRegressionModel()
             >>> model.fit(X_train, y_train)
-            >>> print(f"Number of features used: {model.n_nonzero_features}")
-            >>> print(f"Out of total features: {X_train.shape[1]}")
+            >>> print(f"Non-zero features: {model.n_nonzero_features}")
         """
         if self.model is None:
             raise RuntimeError("Model has not been trained yet. Call fit() first.")
             
         # Get the regressor from the pipeline
-        lasso_cv = self.model.named_steps['regressor']
-        return np.sum(lasso_cv.coef_ != 0)
+        lasso = self.model.named_steps['regressor']
+        
+        # Count non-zero coefficients
+        return np.sum(lasso.coef_ != 0)
