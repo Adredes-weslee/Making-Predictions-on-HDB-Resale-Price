@@ -47,8 +47,35 @@ def create_sidebar(base_dir):
         >>> if selected_page == "Make Prediction":
         ...     show_prediction_page()
     """
+    # Get configuration from session state
+    app_config = st.session_state.get('app_config', {})
+    
+    # Get application settings from config
+    app_title = app_config.get('app', {}).get('title', "HDB Resale Price Prediction")
+    app_description = app_config.get('app', {}).get('description', 
+        "This application provides insights into HDB resale prices and "
+        "allows you to predict the price of a flat based on various features.")
+    app_version = app_config.get('app', {}).get('version', "1.0.0")
+    
+    # Get page configuration
+    pages_config = app_config.get('pages', {})
+    available_pages = []
+    page_titles = []
+    
+    # Build page navigation options from config
+    if pages_config:
+        for page_id, page_info in pages_config.items():
+            if 'title' in page_info:
+                available_pages.append(page_id)
+                page_title = f"{page_info.get('icon', '')} {page_info.get('title')}"
+                page_titles.append(page_title)
+    else:
+        # Fallback to default pages if config is missing
+        available_pages = ["home", "data_explorer", "prediction", "model_insights"]
+        page_titles = ["🏠 Home", "📊 Data Explorer", "🔮 Make Prediction", "📈 Model Insights"]
+    
     # Add title and logo
-    st.sidebar.title("HDB Resale Price Prediction")
+    st.sidebar.title(app_title)
     
     # Try to load the logo if it exists
     logo_path = os.path.join(base_dir, "assets", "hdb_logo.png")
@@ -56,19 +83,31 @@ def create_sidebar(base_dir):
         st.sidebar.image(logo_path, width=150)
     
     # Navigation menu
-    page = st.sidebar.radio(
+    selected_page_title = st.sidebar.radio(
         "Navigation",
-        options=["Home", "Data Explorer", "Make Prediction", "Model Insights"]
+        options=page_titles,
+        index=0
     )
     
+    # Convert the selected page title back to its ID
+    selected_index = page_titles.index(selected_page_title)
+    selected_page = available_pages[selected_index]
+    
+    # Map page IDs to the expected page names in main.py
+    page_name_map = {
+        "home": "Home",
+        "data_explorer": "Data Explorer",
+        "prediction": "Make Prediction",
+        "model_insights": "Model Insights"
+    }
+    
+    display_page = page_name_map.get(selected_page, selected_page.capitalize())
+      # Add app description
     st.sidebar.markdown("---")
-    st.sidebar.info(
-        "This application provides insights into HDB resale prices and "
-        "allows you to predict the price of a flat based on various features."
-    )
+    st.sidebar.info(app_description)
     
     # Add footer with version info
     st.sidebar.markdown("---")
-    st.sidebar.caption("HDB Price Prediction App v1.0.0")
+    st.sidebar.caption(f"HDB Price Prediction App v{app_version}")
     
-    return page
+    return display_page
