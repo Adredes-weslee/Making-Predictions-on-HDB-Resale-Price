@@ -74,7 +74,10 @@ def prepare_data():
     # Load data
     data_paths = get_data_paths()
     try:
-        df = load_raw_data(data_paths["processed"])
+        # Access the processed csv file directly instead of the directory
+        processed_dir = data_paths["processed"] 
+        processed_file = os.path.join(processed_dir, "train_processed.csv")
+        df = load_raw_data(processed_file)
     except FileNotFoundError:
         # Fallback to train data if processed not available
         df = load_raw_data(data_paths["train"])

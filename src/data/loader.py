@@ -127,14 +127,27 @@ def load_train_test_data(
         Training samples: 45000, Test samples: 15000
         >>> print(f"Average training price: ${y_train.mean():.2f}")
         Average training price: $450000.00
-    """
+    """    
     data_paths = get_data_paths()
-    df = load_raw_data(data_paths["train"])
+    
+    try:
+        # Try to load from processed data first
+        processed_dir = data_paths["processed"]
+        processed_file = os.path.join(processed_dir, "train_processed.csv")
+        df = load_raw_data(processed_file)
+    except FileNotFoundError:
+        # Fall back to raw data if needed
+        df = load_raw_data(data_paths["train"])
     
     # Assume 'resale_price' is the target variable
     y = df["resale_price"]
     X = df.drop(columns=["resale_price"])
     
+    # Get model path to check feature alignment
+    model_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(data_paths["train"]))), "models")
+    model_path = os.path.join(model_dir, "linear_regression_model.pkl")
+    
+    # Return the train-test split
     return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
 

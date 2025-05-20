@@ -26,29 +26,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import page components
-from app.pages.home import show_home
-from app.pages.data_explorer import show_data_explorer
-from app.pages.prediction import show_prediction
-from app.pages.model_insights import show_model_insights
+from app.views.home import show_home
+from app.views.data_explorer import show_data_explorer
+from app.views.prediction import show_prediction
+from app.views.model_insights import show_model_insights
 
 # Import UI components
 from app.components.sidebar import create_sidebar
 
-# Import the fixed helper utilities
-from src.utils.helpers_fixed import load_config
+# Import helper utilities
+from src.utils.helpers import load_config
 
 # Define the base directory
 BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Load configurations with our fixed helper function
+# Load configurations with our helper function
 try:
     app_config = load_config('app_config')
     model_config = load_config('model_config')
-    
     # Set page configuration
     st.set_page_config(
         page_title=app_config.get('app', {}).get('title', "HDB Resale Price Prediction"),
         page_icon=app_config.get('app', {}).get('icon', "🏙️"),
+        menu_items=None,  # Hide the default menu
         layout="wide",
         initial_sidebar_state="expanded"
     )

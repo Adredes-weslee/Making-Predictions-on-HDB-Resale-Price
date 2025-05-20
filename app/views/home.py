@@ -75,7 +75,10 @@ def show_home():
     try:
         # Load data summary
         data_paths = get_data_paths()
-        df = load_raw_data(data_paths["processed"])
+        processed_dir = data_paths["processed"]
+        # Use the train_processed.csv file specifically
+        processed_file = os.path.join(processed_dir, "train_processed.csv")
+        df = load_raw_data(processed_file)
         
         # Display quick stats in columns
         st.subheader("Quick Statistics")
@@ -93,7 +96,7 @@ def show_home():
             st.metric("Towns", num_towns)
         
         with col4:
-            recent_year = df["year"].max() if "year" in df.columns else df["Tranc_YearMonth"].dt.year.max()
+            recent_year = df["year"].max() if "year" in df.columns else df["Tranc_YearMonth"].dt.year.max() if "Tranc_YearMonth" in df.columns else "N/A"
             st.metric("Latest Data Year", recent_year)
     
     except Exception as e:
