@@ -137,8 +137,20 @@ def create_dataframe_safely(feature_matrix, index, feature_names=None):
     
     # If feature_names is None or doesn't match the column count, generate generic names
     feature_cols = feature_matrix.shape[1]
-    if feature_names is None or len(feature_names) != feature_cols:
+    if feature_names is None:
         feature_names = [f'feature_{i}' for i in range(feature_cols)]
+    elif len(feature_names) != feature_cols:
+        print(f"Warning: Feature names count ({len(feature_names)}) doesn't match feature matrix columns ({feature_cols})")
+        # Try to adjust the feature names list to match the column count
+        if len(feature_names) > feature_cols:
+            # If there are more names than columns, truncate the list
+            feature_names = feature_names[:feature_cols]
+            print(f"Truncated feature names list to {len(feature_names)} entries")
+        else:
+            # If there are fewer names than columns, append generic names
+            additional_names = [f'feature_{i+len(feature_names)}' for i in range(feature_cols - len(feature_names))]
+            feature_names = feature_names + additional_names
+            print(f"Added {len(additional_names)} generic names to feature names list")
     
     # Create DataFrame safely
     try:
@@ -149,11 +161,26 @@ def create_dataframe_safely(feature_matrix, index, feature_names=None):
         )
     except Exception as e:
         print(f"Error in DataFrame creation: {e}")
-        # Fallback to a more basic approach
-        df = pd.DataFrame(feature_matrix)
-        df.index = index
-        df.columns = feature_names
-        return df
+        # Fallback to a more basic approach with better error reporting
+        try:
+            df = pd.DataFrame(feature_matrix)
+            df.index = index
+            
+            if len(df.columns) == len(feature_names):
+                df.columns = feature_names
+            else:
+                print(f"Column count mismatch in fallback approach: DataFrame has {len(df.columns)} columns, feature_names has {len(feature_names)} entries.")
+                # Use available feature names and generate the rest
+                if len(df.columns) > len(feature_names):
+                    df.columns = feature_names + [f'auto_feature_{i}' for i in range(len(df.columns) - len(feature_names))]
+                else:
+                    df.columns = feature_names[:len(df.columns)]
+            return df
+        except Exception as nested_e:
+            print(f"Fallback DataFrame creation also failed: {nested_e}")
+            # Last resort: create an empty DataFrame with the feature names
+            print("Creating empty DataFrame with feature names as placeholder")
+            return pd.DataFrame(columns=feature_names)
 
 
 def process_raw_data(model_config, data_paths):
@@ -270,8 +297,7 @@ def process_raw_data(model_config, data_paths):
     except Exception as e:
         print(f"Error during feature engineering for training data: {str(e)}")
         return None, None
-    
-    # Process test data if available
+      # Process test data if available
     test_featured_df = None
     if test_preprocessed_df is not None:
         print("Engineering features for test data...")
@@ -279,20 +305,54 @@ def process_raw_data(model_config, data_paths):
             # Transform test data using the already fitted preprocessor
             test_feature_matrix = preprocessor.transform(test_preprocessed_df)
             
-            # Create DataFrame with same feature names as training
+            # Get feature names from training data to ensure consistency
+            feature_names = train_featured_df.columns.tolist()
+            if 'resale_price' in feature_names:
+                feature_names.remove('resale_price')
+                
+            # Create DataFrame with exactly the same feature names as training
             test_featured_df = create_dataframe_safely(
                 feature_matrix=test_feature_matrix,
                 index=test_preprocessed_df.index,
-                feature_names=None
+                feature_names=feature_names
             )
             
             # Add target if it exists in the original test data
             if 'resale_price' in test_df.columns:
-                # We need to align indices between original test data and processed test data
-                if all(idx in test_df.index for idx in test_preprocessed_df.index):
-                    test_featured_df['resale_price'] = test_df.loc[test_preprocessed_df.index, 'resale_price']
+                # Use safer method to align indices
+                test_price_series = test_df['resale_price'].copy()
+                # Ensure indices match by reindexing to the processed test data indices
+                test_price_series = test_price_series.reindex(index=test_preprocessed_df.index)
+                test_featured_df['resale_price'] = test_price_series
             
             print(f"Test features engineered, {test_featured_df.shape[1]} features created")
+            
+            # Make sure training and test have identical columns
+            if not set(train_featured_df.columns) == set(test_featured_df.columns):
+                print(f"Warning: Column mismatch between training and test data:")
+                print(f"Training: {len(train_featured_df.columns)} columns")
+                print(f"Test: {len(test_featured_df.columns)} columns")
+                
+                # Find missing columns
+                train_cols = set(train_featured_df.columns)
+                test_cols = set(test_featured_df.columns)
+                
+                missing_in_test = train_cols - test_cols
+                missing_in_train = test_cols - train_cols
+                
+                if missing_in_test:
+                    print(f"Missing in test: {missing_in_test}")
+                    # Add missing columns to test data with zeros
+                    for col in missing_in_test:
+                        if col != 'resale_price':  # Don't add resale_price if it's not actually there
+                            test_featured_df[col] = 0
+                
+                if missing_in_train:
+                    print(f"Missing in train: {missing_in_train}")
+                    # Add missing columns to training data with zeros
+                    for col in missing_in_train:
+                        if col != 'resale_price':  # Don't modify resale_price
+                            train_featured_df[col] = 0
             
             # Save the processed test data
             test_output_path = os.path.join(processed_dir, "test_processed.csv")
@@ -378,37 +438,97 @@ def main(args):
             
             # Ensure it has the same columns as training data (if we have training data)
             if train_df is not None:
-                if set(train_df.columns) != set(test_df.columns):
+                train_cols = set(train_df.columns)
+                test_cols = set(test_df.columns)
+                
+                if train_cols != test_cols:
                     print("Warning: Column mismatch between training and test data.")
-                    # Check if we can align the columns
-                    common_cols = set(train_df.columns).intersection(set(test_df.columns))
-                    if len(common_cols) > 0 and 'resale_price' in common_cols:
-                        train_df = train_df[list(common_cols)]
-                        test_df = test_df[list(common_cols)]
-                        print(f"Using only {len(common_cols)} common columns between datasets.")
+                    print(f"Training data has {len(train_cols)} columns, test data has {len(test_cols)} columns")
+                    
+                    # Check for missing columns in each dataset
+                    missing_in_test = train_cols - test_cols
+                    missing_in_train = test_cols - train_cols
+                    
+                    if missing_in_test:
+                        print(f"Columns missing in test data: {missing_in_test}")
+                        # Add missing columns to test data with zeros
+                        for col in missing_in_test:
+                            if col != 'resale_price':
+                                test_df[col] = 0
+                            elif col == 'resale_price' and 'resale_price' in missing_in_test:
+                                # Handle special case where test is missing the target column
+                                print("Test data missing 'resale_price' column - this is expected for pure test data")
+                    
+                    if missing_in_train:
+                        print(f"Columns missing in training data: {missing_in_train}")
+                        # Add missing columns to training data with zeros (except resale_price)
+                        for col in missing_in_train:
+                            if col != 'resale_price':
+                                train_df[col] = 0
+                    
+                    # Verify column alignment after fixes
+                    train_cols_after = set(train_df.columns)
+                    test_cols_after = set(test_df.columns)
+                    
+                    # Always ensure 'resale_price' exists in training data
+                    if 'resale_price' not in train_cols_after:
+                        print("Critical error: 'resale_price' still missing from training data after alignment.")
                     else:
-                        print("Insufficient common columns, discarding processed test data.")
-                        test_df = None
+                        # Remove resale_price from the test columns for comparison (it's okay if test doesn't have it)
+                        test_cols_for_comparison = test_cols_after - {'resale_price'}
+                        train_feature_cols = train_cols_after - {'resale_price'}
+                        
+                        if not train_feature_cols.issubset(test_cols_for_comparison) and not test_cols_for_comparison.issubset(train_feature_cols):
+                            print("Warning: Datasets still have inconsistent feature columns after alignment.")
+                            print(f"Feature columns in training but not in test: {train_feature_cols - test_cols_for_comparison}")
+                            print(f"Feature columns in test but not in training: {test_cols_for_comparison - train_feature_cols}")
+                        else:
+                            print(f"Successfully aligned feature columns between datasets (excluding 'resale_price').")
         except Exception as e:
             print(f"Error loading processed test data: {str(e)}")
             test_df = None
-    
-    # If either training or test data is missing, we need to process the raw data
+      # If either training or test data is missing, we need to process the raw data
     if train_df is None or test_df is None:
         train_df, test_df = process_raw_data(model_config, data_paths)
-        
+    
     # Ensure we have data to work with
     if train_df is None or 'resale_price' not in train_df.columns:
         print("Critical error: Failed to load or process training data.")
         return
-    
-    # Separate target variables
+      # Separate target variables
     X_train = train_df.drop('resale_price', axis=1)
     y_train = train_df['resale_price']
     
     if test_df is not None and 'resale_price' in test_df.columns:
         X_test = test_df.drop('resale_price', axis=1)
         y_test = test_df['resale_price']
+        
+        # Ensure X_train and X_test have identical columns
+        train_cols = set(X_train.columns)
+        test_cols = set(X_test.columns)
+        
+        if train_cols != test_cols:
+            print(f"Aligning feature columns between train and test sets")
+            print(f"Train features: {len(train_cols)}, Test features: {len(test_cols)}")
+            
+            # Find columns in training but not in test
+            cols_only_in_train = train_cols - test_cols
+            if cols_only_in_train:
+                print(f"Dropping {len(cols_only_in_train)} columns from training data that don't exist in test data")
+                X_train = X_train.drop(columns=list(cols_only_in_train))
+            
+            # Find columns in test but not in training
+            cols_only_in_test = test_cols - train_cols
+            if cols_only_in_test:
+                print(f"Dropping {len(cols_only_in_test)} columns from test data that don't exist in training data")
+                X_test = X_test.drop(columns=list(cols_only_in_test))
+            
+            # Verify column alignment
+            if set(X_train.columns) == set(X_test.columns):
+                print(f"Successfully aligned feature columns. Using {len(X_train.columns)} features.")
+            else:
+                print("Warning: Could not fully align feature columns.")
+        
         print(f"Using pre-split train ({X_train.shape[0]} samples) and test ({X_test.shape[0]} samples) datasets")
     else:
         # If we don't have separate test data, split training data
