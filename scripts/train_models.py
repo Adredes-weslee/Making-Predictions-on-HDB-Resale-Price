@@ -147,20 +147,59 @@ def main(args):
         >>> parser.add_argument('--linear', action='store_true')
         >>> args = parser.parse_args(['--linear'])
         >>> main(args)  # Trains only the linear regression model
-    """
-    # Load data
+    """    # Load data
     data_paths = get_data_paths()
     df = load_raw_data(data_paths["train"])
     
     print(f"Loaded {len(df)} records")
     
     # Preprocess data
-    processed_df = preprocess_data(df)
+    # preprocess_data returns a tuple (X, y) when is_training=True
+    X_train, y_train = preprocess_data(df, is_training=True)
+    
+    # Add the target back to X for feature engineering
+    processed_df = X_train.copy()
+    processed_df['resale_price'] = y_train
     
     print(f"Data preprocessed, {len(processed_df)} records remaining")
     
     # Engineer features
-    featured_df = engineer_features(processed_df)
+    # engineer_features returns a tuple (preprocessor, numeric_features, categorical_features)
+    # But the expected usage might be to transform the data right away
+    preprocessor, numeric_features, categorical_features = engineer_features(processed_df)
+    
+    # Apply the preprocessor to transform the data
+    # Extract the target variable before processing features
+    X = processed_df.drop('resale_price', axis=1, errors='ignore')
+    y = processed_df['resale_price']
+    
+    # Transform the features
+    feature_matrix = preprocessor.fit_transform(X, y)
+    
+    # Get feature names
+    feature_names = []
+    for name, transformer, _ in preprocessor.transformers_:
+        if name != 'remainder':  # Skip the 'remainder' transformer if present
+            try:
+                transformed_features = preprocessor.named_transformers_[name].get_feature_names_out()
+                feature_names.extend([f"{name}_{feature}" for feature in transformed_features])
+            except (AttributeError, KeyError):
+                # Some transformers may not have get_feature_names_out
+                pass
+    
+    # Create DataFrame from the transformed features
+    if not feature_names or len(feature_names) != feature_matrix.shape[1]:
+        feature_names = [f'feature_{i}' for i in range(feature_matrix.shape[1])]
+    
+    # Create the DataFrame with transformed features
+    featured_df = pd.DataFrame(
+        feature_matrix, 
+        index=processed_df.index, 
+        columns=feature_names
+    )
+    
+    # Add the target variable back
+    featured_df['resale_price'] = y
     
     print(f"Features engineered, {featured_df.shape[1]} features created")
     
