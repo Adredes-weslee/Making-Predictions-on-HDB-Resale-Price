@@ -48,7 +48,7 @@ from src.data.loader import load_raw_data, get_data_paths
 from src.data.preprocessing import preprocess_data
 from src.data.feature_engineering import engineer_features
 from src.models.linear import LinearRegressionModel, LassoRegressionModel, RidgeRegressionModel
-from src.utils.helpers import ensure_dir, serialize_model
+from src.utils.helpers import ensure_dir, serialize_model, load_config
 
 
 def train_and_evaluate_model(X_train, y_train, X_test, y_test, model_class, model_params=None):
@@ -118,6 +118,194 @@ def train_and_evaluate_model(X_train, y_train, X_test, y_test, model_class, mode
     return model, metrics
 
 
+def create_dataframe_safely(feature_matrix, index, feature_names=None):
+    """
+    Create a DataFrame from a feature matrix with proper error handling to avoid
+    array truth value ambiguity issues.
+    
+    Args:
+        feature_matrix (numpy.array): Matrix of feature values
+        index (pandas.Index): Index to use for the DataFrame
+        feature_names (list): Names for columns, will create generic names if None
+    
+    Returns:
+        pd.DataFrame: DataFrame with the given features
+    """
+    # Convert sparse matrix to dense if needed
+    if hasattr(feature_matrix, 'toarray'):
+        feature_matrix = feature_matrix.toarray()
+    
+    # If feature_names is None or doesn't match the column count, generate generic names
+    feature_cols = feature_matrix.shape[1]
+    if feature_names is None or len(feature_names) != feature_cols:
+        feature_names = [f'feature_{i}' for i in range(feature_cols)]
+    
+    # Create DataFrame safely
+    try:
+        return pd.DataFrame(
+            data=feature_matrix,
+            index=index,
+            columns=feature_names
+        )
+    except Exception as e:
+        print(f"Error in DataFrame creation: {e}")
+        # Fallback to a more basic approach
+        df = pd.DataFrame(feature_matrix)
+        df.index = index
+        df.columns = feature_names
+        return df
+
+
+def process_raw_data(model_config, data_paths):
+    """
+    Process raw data through preprocessing and feature engineering steps.
+    This mimics the functionality in preprocess_data.py to ensure consistency.
+    
+    Args:
+        model_config (dict): Model configuration parameters
+        data_paths (dict): Paths to data files
+        
+    Returns:
+        tuple: A tuple containing (train_df, test_df) with processed data
+    """
+    print("Processing raw data...")
+    
+    # Load raw training data
+    try:
+        train_df = load_raw_data(data_paths["train"])
+        print(f"Loaded {len(train_df)} training records from raw data")
+    except FileNotFoundError:
+        print(f"Raw training data file not found! Expected path: {data_paths['train']}")
+        return None, None
+    
+    # Load raw test data
+    test_df = None
+    try:
+        test_df = load_raw_data(data_paths["test"])
+        print(f"Loaded {len(test_df)} test records from raw data")
+    except FileNotFoundError:
+        print(f"Raw test data file not found! Expected path: {data_paths['test']}")
+    
+    # Process training data
+    print("Preprocessing training data...")
+    try:
+        # Preprocess data returns a tuple (X, y) for training data
+        preprocessed_data = preprocess_data(train_df, is_training=True)
+        
+        # Check if it's a tuple and handle accordingly
+        if isinstance(preprocessed_data, tuple):
+            X_preprocessed, y_preprocessed = preprocessed_data
+            # Create a DataFrame with both features and target for feature engineering
+            train_preprocessed_df = X_preprocessed.copy()
+            train_preprocessed_df['resale_price'] = y_preprocessed
+        else:
+            train_preprocessed_df = preprocessed_data
+            
+        print(f"Training data preprocessed, {len(train_preprocessed_df)} records remaining")
+    except Exception as e:
+        print(f"Error during training data preprocessing: {str(e)}")
+        return None, None
+    
+    # Process test data if available
+    test_preprocessed_df = None
+    if test_df is not None:
+        print("Preprocessing test data...")
+        try:
+            # For test data, preprocess_data returns a DataFrame directly
+            test_preprocessed_df = preprocess_data(test_df, is_training=False)
+            print(f"Test data preprocessed, {len(test_preprocessed_df)} records remaining")
+        except Exception as e:
+            print(f"Error during test data preprocessing: {str(e)}")
+            # Continue with training data only
+    
+    # Extract feature configuration
+    features_config = model_config.get('features', {})
+    feature_selection_method = features_config.get('feature_selection', {}).get('method', 'f_regression')
+    feature_selection_k_best = features_config.get('feature_selection', {}).get('k_best', 20)
+    
+    # Convert k_best to percentile if needed
+    if isinstance(feature_selection_k_best, int) and feature_selection_k_best > 0 and feature_selection_k_best <= 100:
+        feature_selection_percentile = feature_selection_k_best
+    else:
+        feature_selection_percentile = 50  # Default to 50 percentile
+        
+    print(f"Using feature selection: {feature_selection_method}, percentile: {feature_selection_percentile}")
+    
+    # Engineer features for training data
+    print("Engineering features for training data...")
+    try:
+        # Get preprocessor with configuration
+        preprocessor, numeric_features, categorical_features = engineer_features(
+            train_preprocessed_df, 
+            feature_selection_percentile=feature_selection_percentile,
+            config=model_config  # Pass the entire config to the function
+        )
+        
+        # Extract X and y for feature transformation
+        X = train_preprocessed_df.drop('resale_price', axis=1, errors='ignore')
+        y = train_preprocessed_df['resale_price']
+        
+        # Fit and transform with the target variable explicitly passed
+        train_feature_matrix = preprocessor.fit_transform(X, y)
+        
+        # Create DataFrame with processed features
+        train_featured_df = create_dataframe_safely(
+            feature_matrix=train_feature_matrix,
+            index=train_preprocessed_df.index,
+            feature_names=None
+        )
+        
+        # Add target back to DataFrame
+        train_featured_df['resale_price'] = y
+        
+        print(f"Training features engineered, {train_featured_df.shape[1]} features created")
+        
+        # Save the processed training data
+        processed_dir = os.path.dirname(data_paths['processed']) if os.path.isfile(data_paths['processed']) else data_paths['processed']
+        os.makedirs(processed_dir, exist_ok=True)
+        train_output_path = os.path.join(processed_dir, "train_processed.csv")
+        train_featured_df.to_csv(train_output_path, index=False)
+        print(f"Processed training data saved to: {train_output_path}")
+        
+    except Exception as e:
+        print(f"Error during feature engineering for training data: {str(e)}")
+        return None, None
+    
+    # Process test data if available
+    test_featured_df = None
+    if test_preprocessed_df is not None:
+        print("Engineering features for test data...")
+        try:
+            # Transform test data using the already fitted preprocessor
+            test_feature_matrix = preprocessor.transform(test_preprocessed_df)
+            
+            # Create DataFrame with same feature names as training
+            test_featured_df = create_dataframe_safely(
+                feature_matrix=test_feature_matrix,
+                index=test_preprocessed_df.index,
+                feature_names=None
+            )
+            
+            # Add target if it exists in the original test data
+            if 'resale_price' in test_df.columns:
+                # We need to align indices between original test data and processed test data
+                if all(idx in test_df.index for idx in test_preprocessed_df.index):
+                    test_featured_df['resale_price'] = test_df.loc[test_preprocessed_df.index, 'resale_price']
+            
+            print(f"Test features engineered, {test_featured_df.shape[1]} features created")
+            
+            # Save the processed test data
+            test_output_path = os.path.join(processed_dir, "test_processed.csv")
+            test_featured_df.to_csv(test_output_path, index=False)
+            print(f"Processed test data saved to: {test_output_path}")
+            
+        except Exception as e:
+            print(f"Error during feature engineering for test data: {str(e)}")
+            # Continue with training data only
+    
+    return train_featured_df, test_featured_df
+
+
 def main(args):
     """Main execution function for the model training script.
     
@@ -147,78 +335,106 @@ def main(args):
         >>> parser.add_argument('--linear', action='store_true')
         >>> args = parser.parse_args(['--linear'])
         >>> main(args)  # Trains only the linear regression model
-    """    # Load data
+    """
+    # Load model configuration
+    model_config = load_config('model_config')
+    
+    # Get data paths
     data_paths = get_data_paths()
-    df = load_raw_data(data_paths["train"])
     
-    print(f"Loaded {len(df)} records")
+    # Get processed data directory
+    processed_dir = data_paths["processed"]
+    if os.path.isfile(processed_dir):
+        processed_dir = os.path.dirname(processed_dir)
     
-    # Preprocess data
-    # preprocess_data returns a tuple (X, y) when is_training=True
-    X_train, y_train = preprocess_data(df, is_training=True)
+    # Define paths for processed files
+    processed_train_path = os.path.join(processed_dir, "train_processed.csv")
+    processed_test_path = os.path.join(processed_dir, "test_processed.csv")
     
-    # Add the target back to X for feature engineering
-    processed_df = X_train.copy()
-    processed_df['resale_price'] = y_train
+    train_df = None
+    test_df = None
     
-    print(f"Data preprocessed, {len(processed_df)} records remaining")
+    # Try to load processed training data
+    if os.path.exists(processed_train_path):
+        print(f"Loading processed training data from: {processed_train_path}")
+        try:
+            train_df = pd.read_csv(processed_train_path)
+            print(f"Loaded processed training data with {train_df.shape[0]} records and {train_df.shape[1]} features")
+            
+            # Ensure 'resale_price' column exists in the loaded data
+            if 'resale_price' not in train_df.columns:
+                print("Warning: 'resale_price' column not found in processed training data. Cannot use this file.")
+                train_df = None
+        except Exception as e:
+            print(f"Error loading processed training data: {str(e)}")
+            train_df = None
     
-    # Engineer features
-    # engineer_features returns a tuple (preprocessor, numeric_features, categorical_features)
-    # But the expected usage might be to transform the data right away
-    preprocessor, numeric_features, categorical_features = engineer_features(processed_df)
+    # Try to load processed test data
+    if os.path.exists(processed_test_path):
+        print(f"Loading processed test data from: {processed_test_path}")
+        try:
+            test_df = pd.read_csv(processed_test_path)
+            print(f"Loaded processed test data with {test_df.shape[0]} records and {test_df.shape[1]} features")
+            
+            # Ensure it has the same columns as training data (if we have training data)
+            if train_df is not None:
+                if set(train_df.columns) != set(test_df.columns):
+                    print("Warning: Column mismatch between training and test data.")
+                    # Check if we can align the columns
+                    common_cols = set(train_df.columns).intersection(set(test_df.columns))
+                    if len(common_cols) > 0 and 'resale_price' in common_cols:
+                        train_df = train_df[list(common_cols)]
+                        test_df = test_df[list(common_cols)]
+                        print(f"Using only {len(common_cols)} common columns between datasets.")
+                    else:
+                        print("Insufficient common columns, discarding processed test data.")
+                        test_df = None
+        except Exception as e:
+            print(f"Error loading processed test data: {str(e)}")
+            test_df = None
     
-    # Apply the preprocessor to transform the data
-    # Extract the target variable before processing features
-    X = processed_df.drop('resale_price', axis=1, errors='ignore')
-    y = processed_df['resale_price']
+    # If either training or test data is missing, we need to process the raw data
+    if train_df is None or test_df is None:
+        train_df, test_df = process_raw_data(model_config, data_paths)
+        
+    # Ensure we have data to work with
+    if train_df is None or 'resale_price' not in train_df.columns:
+        print("Critical error: Failed to load or process training data.")
+        return
     
-    # Transform the features
-    feature_matrix = preprocessor.fit_transform(X, y)
+    # Separate target variables
+    X_train = train_df.drop('resale_price', axis=1)
+    y_train = train_df['resale_price']
     
-    # Get feature names
-    feature_names = []
-    for name, transformer, _ in preprocessor.transformers_:
-        if name != 'remainder':  # Skip the 'remainder' transformer if present
-            try:
-                transformed_features = preprocessor.named_transformers_[name].get_feature_names_out()
-                feature_names.extend([f"{name}_{feature}" for feature in transformed_features])
-            except (AttributeError, KeyError):
-                # Some transformers may not have get_feature_names_out
-                pass
-    
-    # Create DataFrame from the transformed features
-    if not feature_names or len(feature_names) != feature_matrix.shape[1]:
-        feature_names = [f'feature_{i}' for i in range(feature_matrix.shape[1])]
-    
-    # Create the DataFrame with transformed features
-    featured_df = pd.DataFrame(
-        feature_matrix, 
-        index=processed_df.index, 
-        columns=feature_names
-    )
-    
-    # Add the target variable back
-    featured_df['resale_price'] = y
-    
-    print(f"Features engineered, {featured_df.shape[1]} features created")
-    
-    # Separate target variable
-    y = featured_df['resale_price']
-    X = featured_df.drop(columns=['resale_price'])
-    
-    # Split into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    if test_df is not None and 'resale_price' in test_df.columns:
+        X_test = test_df.drop('resale_price', axis=1)
+        y_test = test_df['resale_price']
+        print(f"Using pre-split train ({X_train.shape[0]} samples) and test ({X_test.shape[0]} samples) datasets")
+    else:
+        # If we don't have separate test data, split training data
+        print("No valid test data available, creating a train/test split from training data")
+        # Get evaluation settings from config
+        test_size = model_config.get('evaluation', {}).get('test_size', 0.2)
+        random_state = model_config.get('evaluation', {}).get('random_state', 42)
+        
+        # Split into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_train, y_train, test_size=test_size, random_state=random_state
+        )
     
     print(f"Train set: {X_train.shape}, Test set: {X_test.shape}")
+    
+    # Get model hyperparameters from config
+    lr_params = model_config.get('models', {}).get('linear_regression', {})
+    lasso_params = model_config.get('models', {}).get('lasso_regression', {})
+    ridge_params = model_config.get('models', {}).get('ridge_regression', {})
     
     # Train linear regression model
     if args.linear or args.all:
         print("\nTraining Linear Regression model...")
         lr_model, lr_metrics = train_and_evaluate_model(
-            X_train, y_train, X_test, y_test, LinearRegressionModel
+            X_train, y_train, X_test, y_test, LinearRegressionModel,
+            model_params=lr_params
         )
         
         print("Linear Regression metrics:")
@@ -234,7 +450,7 @@ def main(args):
         print("\nTraining Lasso Regression model...")
         lasso_model, lasso_metrics = train_and_evaluate_model(
             X_train, y_train, X_test, y_test, LassoRegressionModel,
-            model_params={'alpha': 0.01}
+            model_params=lasso_params
         )
         
         print("Lasso Regression metrics:")
@@ -250,7 +466,7 @@ def main(args):
         print("\nTraining Ridge Regression model...")
         ridge_model, ridge_metrics = train_and_evaluate_model(
             X_train, y_train, X_test, y_test, RidgeRegressionModel,
-            model_params={'alpha': 1.0}
+            model_params=ridge_params
         )
         
         print("Ridge Regression metrics:")
