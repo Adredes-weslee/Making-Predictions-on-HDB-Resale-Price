@@ -34,16 +34,35 @@ from app.pages.model_insights import show_model_insights
 # Import UI components
 from app.components.sidebar import create_sidebar
 
-# Set page configuration
-st.set_page_config(
-    page_title="HDB Resale Price Prediction",
-    page_icon="🏙️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Import the fixed helper utilities
+from src.utils.helpers_fixed import load_config
 
 # Define the base directory
 BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Load configurations with our fixed helper function
+try:
+    app_config = load_config('app_config')
+    model_config = load_config('model_config')
+    
+    # Set page configuration
+    st.set_page_config(
+        page_title=app_config.get('app', {}).get('title', "HDB Resale Price Prediction"),
+        page_icon=app_config.get('app', {}).get('icon', "🏙️"),
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # Store configurations in session state for access across pages
+    if 'app_config' not in st.session_state:
+        st.session_state.app_config = app_config
+
+    if 'model_config' not in st.session_state:
+        st.session_state.model_config = model_config
+except Exception as e:
+    st.error(f"Error loading configuration: {str(e)}")
+    app_config = {}
+    model_config = {}
 
 
 def main():
