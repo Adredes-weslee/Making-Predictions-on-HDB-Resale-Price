@@ -63,6 +63,9 @@ def load_training_data(data_path):
     try:
         # Load data
         df = pd.read_csv(data_path, encoding='utf-8')
+
+        # DEBUG: Use only 1% of the data
+        df = df.sample(frac=0.01, random_state=42)
         
         # Check if target variable exists
         if 'resale_price' not in df.columns:
