@@ -44,7 +44,16 @@ def load_raw_data(file_path: str) -> pd.DataFrame:
         >>> print(df.shape)
         (60000, 40)
     """
-    return pd.read_csv(file_path, low_memory=False)
+    try:
+        # Try UTF-8 encoding first
+        return pd.read_csv(file_path, low_memory=False, encoding='utf-8')
+    except UnicodeDecodeError:
+        # If UTF-8 fails, try with default encoding
+        print(f"Warning: UTF-8 encoding failed for {file_path}, trying with default encoding")
+        return pd.read_csv(file_path, low_memory=False)
+    except Exception as e:
+        print(f"Error loading data from {file_path}: {e}")
+        raise
 
 
 def get_data_paths(base_dir: Optional[str] = None) -> Dict[str, str]:
@@ -77,13 +86,42 @@ def get_data_paths(base_dir: Optional[str] = None) -> Dict[str, str]:
         >>> print(paths['train'])
         '/path/to/project/data/raw/train.csv'
     """
-    if base_dir is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return {
-        "train": os.path.join(base_dir, "data", "raw", "train.csv"),
-        "test": os.path.join(base_dir, "data", "raw", "test.csv"),
-        "processed": os.path.join(base_dir, "data", "processed"),
-    }
+    try:
+        if base_dir is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        # Check if we have a config file with custom paths
+        try:
+            config_path = os.path.join(base_dir, 'configs', 'app_config.yaml')
+            if os.path.exists(config_path):
+                import yaml
+                with open(config_path, 'r', encoding='utf-8') as file:
+                    config = yaml.safe_load(file)
+                    data_config = config.get("data", {})
+                    return {
+                        "train": os.path.join(base_dir, "data", "raw", data_config.get("train_file", "train.csv")),
+                        "test": os.path.join(base_dir, "data", "raw", data_config.get("test_file", "test.csv")),
+                        "processed": os.path.join(base_dir, "data", data_config.get("processed_dir", "processed")),
+                    }
+        except Exception as e:
+            print(f"Warning: Could not load config file, using default paths: {e}")
+        
+        # Default paths if config loading fails
+        return {
+            "train": os.path.join(base_dir, "data", "raw", "train.csv"),
+            "test": os.path.join(base_dir, "data", "raw", "test.csv"),
+            "processed": os.path.join(base_dir, "data", "processed"),
+        }
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+        # Ultimate fallback if everything fails
+        if base_dir is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return {
+            "train": os.path.join(base_dir, "data", "raw", "train.csv"),
+            "test": os.path.join(base_dir, "data", "raw", "test.csv"),
+            "processed": os.path.join(base_dir, "data", "processed"),
+        }
 
 
 def load_train_test_data(
