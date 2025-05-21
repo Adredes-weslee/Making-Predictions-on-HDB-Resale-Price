@@ -11,92 +11,137 @@ The application includes the following main sections:
 3. Make Prediction - Form for users to input property details and get price predictions
 4. Model Insights - Analysis of model performance and feature importance
 
-The application uses a modular structure with separate modules for each page and
-reusable components to maintain code organization and readability.
-
 Typical usage:
     $ streamlit run app/main.py
 """
-import os
 import streamlit as st
-import sys
+import pandas as pd
+import numpy as np
+import joblib
+import json
+import os
 from pathlib import Path
+import logging
 
-# Add the project root to the Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import views
+from views.home import show_home
+from views.data_explorer import show_data_explorer
+from views.prediction import show_prediction
+from views.model_insights import show_model_insights
 
-# Import page components
-from app.views.home import show_home
-from app.views.data_explorer import show_data_explorer
-from app.views.prediction import show_prediction
-from app.views.model_insights import show_model_insights
+# Import components
+from components.sidebar import create_sidebar
 
-# Import UI components
-from app.components.sidebar import create_sidebar
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Import helper utilities
-from src.utils.helpers import load_config
+# Set page configuration
+st.set_page_config(
+    page_title="HDB Resale Price Predictor",
+    page_icon="🏙️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Define the base directory
-BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Application title and styling
+st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1E88E5;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Load configurations with our helper function
-try:
-    app_config = load_config('app_config')
-    model_config = load_config('model_config')
-    # Set page configuration
-    st.set_page_config(
-        page_title=app_config.get('app', {}).get('title', "HDB Resale Price Prediction"),
-        page_icon=app_config.get('app', {}).get('icon', "🏙️"),
-        menu_items=None,  # Hide the default menu
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
-    # Store configurations in session state for access across pages
-    if 'app_config' not in st.session_state:
-        st.session_state.app_config = app_config
-
-    if 'model_config' not in st.session_state:
-        st.session_state.model_config = model_config
-except Exception as e:
-    st.error(f"Error loading configuration: {str(e)}")
-    app_config = {}
-    model_config = {}
-
-
-def main():
-    """Main function to run the Streamlit application.
-    
-    This function serves as the entry point for the application. It:
-    1. Sets up the sidebar navigation using create_sidebar()
-    2. Gets the user's selected page from the sidebar
-    3. Routes to the appropriate page function based on the selection
-    
-    Each page function (show_home, show_data_explorer, etc.) is responsible for
-    rendering its own content. This routing pattern keeps the main function clean
-    and focused on application flow control.
+@st.cache_resource
+def load_models():
+    """Load all pre-trained models at startup and cache them.
     
     Returns:
-        None: This function renders Streamlit UI directly and doesn't return values.
-        
-    Example:
-        >>> main()
-        # Renders the complete Streamlit application with navigation
+        dict: Dictionary containing loaded models and their metrics
     """
-    # Create sidebar and get selected page
-    page = create_sidebar(BASE_DIR)
+    try:
+        # Get models directory
+        root_dir = Path(__file__).parent.parent
+        models_dir = os.path.join(root_dir, 'models')
+        
+        # Initialize models dictionary
+        models = {}
+        
+        # Define model types to load
+        model_types = ['linear', 'ridge', 'lasso']
+        
+        for model_type in model_types:
+            try:
+                # Load model
+                model_path = os.path.join(models_dir, f"pipeline_{model_type}_model.pkl")
+                if os.path.exists(model_path):
+                    models[f"{model_type}_model"] = joblib.load(model_path)
+                    logger.info(f"Loaded {model_type} model successfully")
+                else:
+                    logger.warning(f"Model file not found: {model_path}")
+                    models[f"{model_type}_model"] = None
+                
+                # Load metrics
+                metrics_path = os.path.join(models_dir, f"pipeline_{model_type}_model_metrics.json")
+                if os.path.exists(metrics_path):
+                    with open(metrics_path, 'r') as f:
+                        models[f"{model_type}_metrics"] = json.load(f)
+                else:
+                    logger.warning(f"Metrics file not found: {metrics_path}")
+                    models[f"{model_type}_metrics"] = None
+                
+                # Load feature info
+                features_path = os.path.join(models_dir, f"pipeline_{model_type}_model_features.json")
+                if os.path.exists(features_path):
+                    with open(features_path, 'r') as f:
+                        models[f"{model_type}_features"] = json.load(f)
+                else:
+                    logger.warning(f"Features file not found: {features_path}")
+                    models[f"{model_type}_features"] = None
+                    
+            except Exception as e:
+                logger.error(f"Error loading {model_type} model: {str(e)}")
+                models[f"{model_type}_model"] = None
+                models[f"{model_type}_metrics"] = None
+                models[f"{model_type}_features"] = None
+        
+        return models
     
-    # Display appropriate page based on selection
-    if page == "Home":
-        show_home()
-    elif page == "Data Explorer":
-        show_data_explorer()
-    elif page == "Make Prediction":
-        show_prediction()
-    elif page == "Model Insights":
-        show_model_insights()
+    except Exception as e:
+        logger.error(f"Error in load_models: {str(e)}")
+        st.error(f"Failed to load models: {str(e)}")
+        return {}
 
+def main():
+    """Main function to run the Streamlit app."""
+    try:
+        # Load models once at startup
+        models = load_models()
+        
+        # Store models in session state for access across pages
+        if 'models' not in st.session_state:
+            st.session_state['models'] = models
+        
+        # Create sidebar and get selected page
+        selected_page = create_sidebar()
+        
+        # Display selected page
+        if selected_page == "Home":
+            show_home()
+        elif selected_page == "Data Explorer":
+            show_data_explorer()
+        elif selected_page == "Make Prediction":
+            show_prediction()
+        elif selected_page == "Model Performance":
+            show_model_insights()
+        else:
+            show_home()  # Default to home
+            
+    except Exception as e:
+        st.error(f"An error occurred in the application: {str(e)}")
+        logger.error(f"Application error: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     main()

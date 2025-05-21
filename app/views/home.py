@@ -1,135 +1,141 @@
-"""Home page component for the Streamlit application.
+"""Home page view for the Streamlit application.
 
-This module defines the homepage UI for the HDB Resale Price Prediction Streamlit
-application. It displays an informative landing page with project overview,
-key statistics about the dataset, usage instructions, and information about
-the prediction model.
-
-The homepage serves as the main entry point for users, providing navigation
-guidance and context about the HDB resale market in Singapore.
-
-Typical usage:
-    >>> import streamlit as st
-    >>> from app.pages.home import show_home
-    >>> show_home()
+This module provides the home page view for the application, which includes
+an introduction to the project, overview of the dataset, and highlights of key insights.
 """
 import streamlit as st
 import pandas as pd
+import numpy as np
 import os
 from pathlib import Path
-
-# Import utility functions
-from src.data.loader import get_data_paths, load_raw_data
-
+import time
 
 def show_home():
-    """Display the home page of the application.
+    """Display the home page content."""
+    # Header
+    st.markdown("<h1 class='main-header'>HDB Resale Price Prediction</h1>", unsafe_allow_html=True)
     
-    This function renders the complete homepage UI with multiple sections:
-    1. Introduction and welcome message
-    2. Quick statistics about the dataset (if available)
-    3. Application usage instructions
-    4. Background information about the prediction model
-    5. Project footer with attribution
-    
-    The function attempts to load and display summary statistics from the
-    processed dataset. If data loading fails, appropriate error messages
-    are shown without disrupting the rest of the UI.
-    
-    Returns:
-        None: The function renders Streamlit UI elements directly.
-        
-    Raises:
-        No exceptions are raised as errors are handled internally with
-        appropriate UI feedback.
-    
-    Example:
-        >>> show_home()
-        # Renders the complete homepage in the Streamlit app
-    """
-    st.title("HDB Resale Price Prediction")
-    
-    # Introduction section
+    # Introduction
     st.markdown("""
-    ## Welcome to the HDB Resale Price Analytics Dashboard!
+    ## Welcome to the HDB Resale Price Predictor!
     
-    This application provides insights and predictions for Housing Development Board (HDB) 
-    resale flat prices in Singapore. The app is built on a machine learning model trained on 
-    historical HDB resale transactions.
-    
-    ### What you can do with this application:
-    
-    - **Explore Data**: Analyze historical HDB resale transactions with interactive visualizations
-    - **Predict Prices**: Get estimated resale price for a flat based on its attributes
-    - **Model Insights**: Understand which factors influence HDB resale prices the most
-    
-    ### About HDB Resale Flats
-    
-    The Housing & Development Board (HDB) is Singapore's public housing authority. Over 80% of 
-    Singapore's population lives in HDB flats, making them a crucial component of the housing market.
-    The resale prices of these flats are influenced by various factors including location, flat type,
-    floor area, and remaining lease.
+    This application helps you explore public housing resale prices in Singapore and make predictions
+    based on various property attributes. Using machine learning models trained on historical transaction
+    data, you can get estimated prices for HDB flats across different towns, flat types, and more.
     """)
     
-    # Quick stats
-    try:
-        # Load data summary
-        data_paths = get_data_paths()
-        processed_dir = data_paths["processed"]
-        # Use the train_processed.csv file specifically
-        processed_file = os.path.join(processed_dir, "train_processed.csv")
-        df = load_raw_data(processed_file)
+    # Main sections in columns
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        st.markdown("""
+        ### What You Can Do:
         
-        # Display quick stats in columns
-        st.subheader("Quick Statistics")
-        col1, col2, col3, col4 = st.columns(4)
+        **📊 Data Explorer**
+        - Visualize resale price trends over time
+        - Compare prices across different towns and flat types
+        - Explore relationships between property attributes and prices
         
-        with col1:
-            st.metric("Total Records", f"{len(df):,}")
+        **🔮 Make Prediction**
+        - Input property details to get a predicted resale price
+        - See how changing attributes affects the estimated price
         
-        with col2:
-            avg_price = df["resale_price"].mean()
-            st.metric("Average Price", f"${avg_price:,.2f}")
+        **📈 Model Performance**
+        - Compare performance of different prediction models
+        - Understand which features have the most impact on prices
+        - See evaluation metrics for each model
+        """)
         
-        with col3:
-            num_towns = df["town"].nunique()
-            st.metric("Towns", num_towns)
-        
-        with col4:
-            recent_year = df["year"].max() if "year" in df.columns else df["Tranc_YearMonth"].dt.year.max() if "Tranc_YearMonth" in df.columns else "N/A"
-            st.metric("Latest Data Year", recent_year)
+    with col2:
+        # Load a sample visualization or key metrics
+        try:
+            st.image("app/static/singapore_map.jpg", caption="Singapore HDB Towns")
+        except:
+            st.info("Singapore HDB town map visualization")
     
-    except Exception as e:
-        st.warning("Could not load data statistics. Please check the data files.")
-        st.error(f"Error: {e}")
-    
-    # How to use section
-    st.markdown("""
-    ## How to Use This Application
-    
-    1. Use the navigation menu on the sidebar to switch between different sections
-    2. In the **Data Explorer**, you can analyze HDB resale data through various visualizations
-    3. In the **Make Prediction** section, enter details about an HDB flat to get a price estimate
-    4. The **Model Insights** section provides information about the features that influence prices
-    
-    ### Background on the Model
-    
-    The prediction model is built using machine learning techniques with features including:
-    
-    - Location-based features (town, planning area)
-    - Property attributes (flat type, floor area)
-    - Age and lease-related features
-    - Nearby amenities and facilities
-    - Historical transaction trends
-    
-    The model is regularly updated to reflect the latest market trends and provides reliable predictions 
-    for HDB resale flat prices in Singapore.
-    """)
-    
-    # Footer
+    # Dataset overview
     st.markdown("---")
-    st.markdown("### About this project")
-    st.markdown(
-        "This application was developed as part of a data science project to analyze and "
-        "predict HDB resale prices in Singapore. The source code is available on GitHub."
-    )
+    st.markdown("## Dataset Overview")
+    
+    # Load dataset statistics from cache or calculate them
+    @st.cache_data
+    def get_dataset_stats():
+        try:
+            # Get data directory
+            root_dir = Path(__file__).parent.parent.parent
+            data_path = os.path.join(root_dir, 'data', 'processed', 'train_processed_exploratory.csv')
+            
+            # Check if file exists
+            if not os.path.exists(data_path):
+                return {
+                    "transactions": "N/A",
+                    "time_period": "N/A",
+                    "towns": "N/A",
+                    "price_range": "N/A"
+                }
+            
+            # Load data
+            df = pd.read_csv(data_path)
+            
+            # Calculate statistics
+            stats = {
+                "transactions": f"{len(df):,}",
+                "time_period": f"{df['year_month'].min()} to {df['year_month'].max()}" if 'year_month' in df.columns else "N/A",
+                "towns": f"{df['town'].nunique()}" if 'town' in df.columns else "N/A",
+                "price_range": f"${df['resale_price'].min():,.0f} - ${df['resale_price'].max():,.0f}" if 'resale_price' in df.columns else "N/A"
+            }
+            
+            # Store town and flat type options in session state for use in other pages
+            if 'town' in df.columns:
+                st.session_state['towns'] = sorted(df['town'].unique().tolist())
+            
+            if 'flat_type' in df.columns:
+                st.session_state['flat_types'] = sorted(df['flat_type'].unique().tolist())
+                
+            return stats
+            
+        except Exception as e:
+            st.error(f"Error loading dataset statistics: {str(e)}")
+            return {
+                "transactions": "Error",
+                "time_period": "Error",
+                "towns": "Error",
+                "price_range": "Error"
+            }
+    
+    # Get statistics
+    stats = get_dataset_stats()
+    
+    # Display statistics in columns
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("Total Transactions", stats["transactions"])
+    with cols[1]:
+        st.metric("Time Period", stats["time_period"])
+    with cols[2]:
+        st.metric("Number of Towns", stats["towns"])
+    with cols[3]:
+        st.metric("Price Range", stats["price_range"])
+        
+    # Project description
+    st.markdown("---")
+    st.markdown("""
+    ## About This Project
+    
+    This project analyzes HDB resale transactions to build price prediction models. 
+    
+    The models incorporate various factors that impact property values, including location, property attributes, 
+    market conditions, and more. Using machine learning techniques, we've identified the most important factors
+    and created models that can estimate resale prices with high accuracy.
+    
+    ### Data Sources
+    
+    The dataset used in this project comes from data.gov.sg and includes historical HDB resale transactions.
+    
+    ### Methodology
+    
+    We employed several regression models (Linear Regression, Ridge, Lasso) and evaluated their performance.
+    The models were trained on historical data and validated using standard metrics like R² and RMSE.
+    
+    Use the navigation on the left to explore more!
+    """)
