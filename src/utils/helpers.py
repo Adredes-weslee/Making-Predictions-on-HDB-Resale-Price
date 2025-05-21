@@ -20,6 +20,7 @@ Typical usage:
 """
 import os
 import yaml
+import logging
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -48,7 +49,9 @@ def get_project_root():
         >>> data_dir = root_dir / 'data' / 'raw'
         >>> models_dir = root_dir / 'models'
     """
-    return Path(__file__).parent.parent.parent
+    current_file = Path(__file__).resolve()
+    # Navigate up 2 directories from utils/ to reach project root
+    return current_file.parent.parent.parent
 
 
 def load_config(config_name):
@@ -77,13 +80,77 @@ def load_config(config_name):
     """
     config_path = get_project_root() / "configs" / f"{config_name}.yaml"
     
-    if not config_path.exists():
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    except FileNotFoundError:
+        logging.error(f"Configuration file not found: {config_path}")
         return {}
+    except yaml.YAMLError as e:
+        logging.error(f"Error parsing YAML configuration: {e}")
+        return {}
+
+
+def setup_logging(level=logging.INFO, log_file=None):
+    """Set up logging configuration for the application.
     
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
+    This function configures the Python logging system with appropriate formatters,
+    handlers, and log levels. It creates a consistent logging environment across
+    different modules in the application.
+    
+    Args:
+        level (int, optional): The logging level to use. Should be one of the
+            constants defined in the logging module (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+            Defaults to logging.INFO.
+        log_file (str, optional): Path to a file where logs should be written.
+            If None, logs will only be sent to the console. Defaults to None.
+    
+    Returns:
+        None: The function configures the logging system but doesn't return anything.
+    
+    Example:
+        >>> from src.utils.helpers import setup_logging
+        >>> import logging
+        >>> # Basic setup with INFO level
+        >>> setup_logging()
+        >>> # Now you can use logging as normal
+        >>> logger = logging.getLogger(__name__)
+        >>> logger.info("Application started")
+    """
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Remove any existing handlers to avoid duplicate logs
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Create file handler if log_file is specified
+    if log_file:
+        from pathlib import Path
+        # Ensure log directory exists
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+    
+    # Suppress overly verbose logs from libraries
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    
 def ensure_dir(directory):
     """Ensure that a directory exists, creating it if necessary.
     
@@ -236,3 +303,4 @@ def deserialize_model(filename):
     
     with open(model_path, 'rb') as f:
         return pickle.load(f)
+
