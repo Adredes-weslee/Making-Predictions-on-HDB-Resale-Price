@@ -42,6 +42,7 @@ import pandas as pd
 from sklearn.pipeline import Pipeline
 
 from src.data.feature_engineering import engineer_features
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
 
 
 class Model:
@@ -211,7 +212,7 @@ class Model:
             raise RuntimeError("Model has not been trained yet. Call fit() first.")
         
         return self.model.score(X, y)
-    
+        
     def save(self, filename: Optional[str] = None) -> str:
         """Save the trained model to disk.
         
@@ -285,3 +286,19 @@ class Model:
             self.pipeline = self.model
             
         return self
+
+def get_model_class(model_type):
+    """Get the appropriate model class for a given model type.
+    
+    Args:
+        model_type (str): Type of model ('linear', 'ridge', 'lasso')
+        
+    Returns:
+        class: The scikit-learn model class
+    """
+    model_classes = {
+        'linear': LinearRegression,
+        'ridge': Ridge,
+        'lasso': Lasso
+    }
+    return model_classes.get(model_type)
