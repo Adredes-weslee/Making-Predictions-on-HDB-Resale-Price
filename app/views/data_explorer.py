@@ -61,9 +61,10 @@ def show_data_explorer():
             if 'towns' in st.session_state:
                 towns = st.session_state.towns
                 selected_towns = st.multiselect(
-                    "Towns",
+                    "Select Towns",
                     options=towns,
-                    default=towns[:5] if len(towns) > 5 else towns
+                    default=towns[:5] if len(towns) > 5 else towns,
+                    key="explorer_towns"  # Add this unique key
                 )
             else:
                 selected_towns = None
