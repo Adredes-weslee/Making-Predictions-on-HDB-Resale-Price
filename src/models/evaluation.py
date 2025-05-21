@@ -31,6 +31,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import cross_val_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 from src.models.base import Model
 
@@ -75,23 +76,22 @@ def evaluate_model(
         >>> print(f"Test RMSE: ${metrics['test_rmse']:,.2f}")
         Test RMSE: $32,150.25
     """
-    # Calculate scores
-    train_score = model.score(X_train, y_train)
-    test_score = model.score(X_test, y_test)
+    # Make predictions
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
     
-    # Calculate RMSE
-    train_preds = model.predict(X_train)
-    test_preds = model.predict(X_test)
+    # Calculate metrics for training data
+    train_metrics = calculate_metrics(y_train, y_train_pred)
+    train_metrics = {f'train_{k}': v for k, v in train_metrics.items()}
     
-    train_rmse = np.sqrt(np.mean((y_train - train_preds) ** 2))
-    test_rmse = np.sqrt(np.mean((y_test - test_preds) ** 2))
+    # Calculate metrics for test data
+    test_metrics = calculate_metrics(y_test, y_test_pred)
+    test_metrics = {f'test_{k}': v for k, v in test_metrics.items()}
     
-    return {
-        "train_r2": train_score,
-        "test_r2": test_score,
-        "train_rmse": train_rmse,
-        "test_rmse": test_rmse
-    }
+    # Combine metrics
+    metrics = {**train_metrics, **test_metrics}
+    
+    return metrics
 
 
 def cross_validate_model(
@@ -414,3 +414,24 @@ def plot_prediction_error(
     
     plt.tight_layout()
     return g.fig
+
+
+def calculate_metrics(y_true, y_pred):
+    """Calculate standard regression metrics for model evaluation.
+    
+    Args:
+        y_true: Array-like of true target values
+        y_pred: Array-like of predicted target values
+        
+    Returns:
+        dict: Dictionary containing metrics (r2, rmse, mae)
+    """
+    r2 = r2_score(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    
+    return {
+        'r2_score': r2,
+        'rmse': rmse,
+        'mae': mae
+    }
