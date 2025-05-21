@@ -4,6 +4,12 @@ This module provides functions to clean, transform, and prepare raw HDB resale
 transaction data for analysis and modeling. It handles data cleaning tasks like
 missing value imputation, data type conversion, and outlier treatment.
 
+⚠️ IMPORTANT NOTE FOR MODEL TRAINING ⚠️
+For model training and production deployment, please use the pipeline-based approach
+implemented in src.models.training instead of these direct function calls.
+This module is primarily maintained for exploratory data analysis, visualization,
+and backward compatibility.
+
 The preprocessing pipeline includes:
 1. Cleaning raw data (handling missing values, correcting data types)
 2. Creating temporal features from transaction dates
