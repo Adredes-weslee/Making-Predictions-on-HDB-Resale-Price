@@ -74,15 +74,20 @@ def load_models():
         
         for model_type in model_types:
             try:
-                # Load model
+                # Load pipeline model
                 model_path = os.path.join(models_dir, f"pipeline_{model_type}_model.pkl")
                 if os.path.exists(model_path):
-                    models[f"{model_type}_model"] = joblib.load(model_path)
+                    # Store with both keys for compatibility
+                    pipeline = joblib.load(model_path)
+                    models[f"{model_type}_pipeline"] = pipeline  # Key for make_prediction function
+                    models[f"{model_type}_model"] = pipeline     # Keep original key for backward compatibility
                     logger.info(f"Loaded {model_type} model successfully")
                 else:
                     logger.warning(f"Model file not found: {model_path}")
+                    models[f"{model_type}_pipeline"] = None
                     models[f"{model_type}_model"] = None
                 
+                # Rest of the loading code remains the same
                 # Load metrics
                 metrics_path = os.path.join(models_dir, f"pipeline_{model_type}_model_metrics.json")
                 if os.path.exists(metrics_path):
@@ -103,6 +108,7 @@ def load_models():
                     
             except Exception as e:
                 logger.error(f"Error loading {model_type} model: {str(e)}")
+                models[f"{model_type}_pipeline"] = None
                 models[f"{model_type}_model"] = None
                 models[f"{model_type}_metrics"] = None
                 models[f"{model_type}_features"] = None
