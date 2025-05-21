@@ -29,12 +29,12 @@ features:
 models:
   linear_regression:
     fit_intercept: true
-    normalize: false
+    normalize: false # Deprecated parameter
   
   ridge_regression:
     alpha: 1.0
     fit_intercept: true
-    normalize: false
+    normalize: false # Deprecated parameter
     max_iter: 1000
     tol: 0.001
     solver: "auto"
@@ -42,7 +42,7 @@ models:
   lasso_regression:
     alpha: 0.01
     fit_intercept: true
-    normalize: false
+    normalize: false # Deprecated parameter
     max_iter: 1000
     tol: 0.0001
     warm_start: false
