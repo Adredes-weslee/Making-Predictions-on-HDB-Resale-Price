@@ -9,6 +9,7 @@ import numpy as np
 import os
 from pathlib import Path
 import joblib
+import pickle
 import json
 from datetime import datetime
 
@@ -28,7 +29,7 @@ def load_towns_and_features():
             return {}
             
         # Load a sample of the data
-        df = pd.read_csv(data_path, nrows=10000)
+        df = pd.read_csv(data_path, nrows=10000, low_memory=False)
         
         # Extract unique values for categorical features
         feature_options = {}
@@ -58,34 +59,108 @@ def load_towns_and_features():
         st.error(f"Error loading feature options: {str(e)}")
         return {}
 
-def make_prediction(input_data, models_dict, model_type='ridge'):
-    """Make a price prediction using the selected model.
+def prepare_features_for_prediction(input_data, model_features):
+    """
+    Prepare input data for prediction by ensuring all required columns exist.
     
     Args:
-        input_data: Dictionary of property attributes
-        models_dict: Dictionary containing loaded models
-        model_type: Type of model to use for prediction
+        input_data: Dictionary or DataFrame of input features
+        model_features: Feature info from the loaded model
         
     Returns:
-        float: Predicted price
-        dict: Additional information for display
+        pd.DataFrame: DataFrame with all required columns
     """
+    # Convert to DataFrame if it's a dictionary
+    if isinstance(input_data, dict):
+        input_df = pd.DataFrame([input_data])
+    else:
+        input_df = input_data.copy()
+    
+    # Get the list of required columns from model_features if available
+    required_columns = model_features.get('all_features', None) if model_features else None
+    
+    # If we don't have the feature list, use the default list (as you already have)
+    if not required_columns:
+        # Your existing default columns list is fine here
+        required_columns = [
+            'town', 'flat_type', 'flat_model', 'storey_range', 'floor_area_sqm', 'remaining_lease',
+            'transaction_month', 'transaction_year', 'Hawker_Nearest_Distance', 'bus_stop_longitude',
+            'sec_sch_nearest_dist', 'block', 'hawker_market_stalls', 'lease_commence_date', '1room_sold',
+            'lower', 'Tranc_YearMonth', 'Latitude', 'Hawker_Within_1km', 'exec_sold', 'upper', 'postal',
+            'hdb_age', 'commercial', '5room_sold', 'affiliation', 'cutoff_point', 'bus_interchange',
+            'mid', 'pri_sch_nearest_distance', 'Mall_Within_500m', 'bus_stop_latitude', 'multistorey_carpark',
+            'mrt_longitude', 'residential', 'Longitude', 'floor_area_sqft', 'Tranc_Month', 'Tranc_Year',
+            'address', 'sec_sch_longitude', 'vacancy', 'market_hawker', '3room_sold', '3room_rental',
+            'Hawker_Within_2km', 'mrt_interchange', 'bus_stop_name', '2room_sold',
+            'bus_stop_nearest_distance', 'mrt_nearest_distance', 'hawker_food_stalls',
+            'studio_apartment_sold', 'pri_sch_latitude', 'sec_sch_latitude', 'pri_sch_name',
+            'mid_storey', 'precinct_pavilion', 'street_name', 'other_room_rental', '4room_sold',
+            'Mall_Within_1km', '2room_rental', 'id', 'mrt_name', 'planning_area', 'mrt_latitude',
+            'pri_sch_affiliation', 'total_dwelling_units', 'Mall_Nearest_Distance', 'max_floor_lvl',
+            'pri_sch_longitude', 'Mall_Within_2km', 'year_completed', 'multigen_sold', 'Hawker_Within_500m',
+            'full_flat_type', '1room_rental', 'sec_sch_name'
+        ]
+    
+    # Get categorical features if available
+    categorical_features = model_features.get('categorical_features', []) if model_features else []
+    
+    # Add missing columns with numeric default values (0 for everything)
+    for col in required_columns:
+        if col not in input_df.columns:
+            # Use 0 for all missing columns
+            # Pipeline will handle transformations for categorical columns
+            input_df[col] = 0
+    
+    # Handle categorical values that exist in input data
+    # Explicitly convert categorical columns to string type since we provided numeric defaults
+    for col in categorical_features:
+        if col in input_df.columns:
+            input_df[col] = input_df[col].astype(str)
+    
+    return input_df
+
+def make_prediction(input_data, models_dict, model_type='ridge'):
+    """Make a price prediction using the selected model."""
     try:
         # Check if model exists
-        if f"{model_type}_model" not in models_dict or models_dict[f"{model_type}_model"] is None:
-            return None, {"error": f"Model '{model_type}' not available"}
+        pipeline_key = f"{model_type}_pipeline"
+        model_key = f"{model_type}_model"
+        features_key = f"{model_type}_features"
+        
+        # Get model features if available
+        model_features = models_dict.get(features_key, None)
+        
+        # First try to use pipeline if available (preferred method)
+        if pipeline_key in models_dict and models_dict[pipeline_key] is not None:
+            # Get the pipeline
+            pipeline = models_dict[pipeline_key]
             
-        # Get the model
-        model = models_dict[f"{model_type}_model"]
+            # Prepare input data as DataFrame with all required columns
+            input_df = prepare_features_for_prediction(input_data, model_features)
+            
+            # Use pipeline to transform and predict
+            predicted_price = pipeline.predict(input_df)[0]
         
-        # Prepare input data as DataFrame
-        input_df = pd.DataFrame([input_data])
+        # Fall back to direct model prediction if pipeline not available
+        elif model_key in models_dict and models_dict[model_key] is not None:
+            # Get the model
+            model = models_dict[model_key]
+            
+            # Prepare input data
+            input_df = prepare_features_for_prediction(input_data, model_features)
+            
+            # Make prediction
+            predicted_price = model.predict(input_df)[0]
         
-        # Make prediction
-        predicted_price = model.predict(input_df)[0]
+        else:
+            return None, {"error": f"Model '{model_type}' not available"}
         
-        # Get model metrics for context
+        # Get model metrics for context - with extra safety check
         model_metrics = models_dict.get(f"{model_type}_metrics", {})
+        if model_metrics is None:  # Extra defensive check
+            model_metrics = {}
+            
+        # Now safely access metrics with defaults
         model_r2 = model_metrics.get('test_r2', 0)
         model_rmse = model_metrics.get('test_rmse', 0)
         
@@ -101,6 +176,8 @@ def make_prediction(input_data, models_dict, model_type='ridge'):
         
     except Exception as e:
         st.error(f"Prediction error: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None, {"error": str(e)}
 
 def show_prediction():
