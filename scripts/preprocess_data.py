@@ -11,608 +11,318 @@ The preprocessing workflow consists of:
 4. Saving the processed dataset for use by the dashboard and models
 
 Usage:
-    python preprocess_data.py
+    python preprocess_data.py [--no-save] [--debug]
 
-The script outputs processed CSV files in the data/processed directory.
+Options:
+    --no-save: Run preprocessing without saving the outputs
+    --debug: Enable additional debug logging
 """
 import os
 import sys
+import json
 import logging
 import argparse
-import traceback
+from datetime import datetime
 from pathlib import Path
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('preprocessing.log'),
-        logging.StreamHandler()
-    ]
-)
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# Add the project root to the path
+root_dir = Path(__file__).parent.parent
+sys.path.append(str(root_dir))
+
+# Import project modules
+from src.data.loader import get_data_paths, load_raw_data, save_processed_data
+from src.data.preprocessing import clean_data
+from src.utils.helpers import get_project_root, load_config, setup_logging
+
+# Setup logging
 logger = logging.getLogger(__name__)
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+def setup_directories():
+    """Create necessary directories if they don't exist."""
+    base_dir = get_project_root()
+    processed_dir = base_dir / "data" / "processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    return processed_dir
 
-# Import data processing functions
-try:
-    from src.data.loader import load_raw_data, get_data_paths, save_processed_data
-    from src.data.preprocessing import preprocess_data
-    from src.data.feature_engineering import engineer_features
-    from src.utils.helpers import load_config
-except ImportError as e:
-    logger.error(f"Error importing required modules: {e}")
-    logger.error("Make sure you're running this script from the project root directory")
-    sys.exit(1)
+def extract_features_info(df):
+    """
+    Extract and save feature information to aid in interpretation and debugging.
+    
+    Args:
+        df: DataFrame with features
+    
+    Returns:
+        Dictionary with feature metadata
+    """
+    # Get numerical and categorical features
+    numerical_features = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    categorical_features = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    
+    # Feature info
+    feature_info = {
+        'numerical_features': numerical_features,
+        'categorical_features': categorical_features,
+        'total_features': len(df.columns),
+        'numerical_count': len(numerical_features),
+        'categorical_count': len(categorical_features),
+        'feature_names': df.columns.tolist(),
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    return feature_info
 
-def process_training_data():
+def engineer_temporal_features(df):
     """
-    Process training data through preprocessing and feature engineering steps.
+    Add temporal features based on transaction date.
+    
+    Args:
+        df: DataFrame with transaction date column
+        
+    Returns:
+        DataFrame with additional temporal features
     """
-    # Load configuration
-    model_config = load_config('model_config')
-    logger.info("Loaded model configuration")
+    logger.info("Engineering temporal features...")
     
-    # Get paths
-    data_paths = get_data_paths()
+    # Check if date-related columns exist
+    date_columns = [col for col in df.columns if any(term in col.lower() 
+                                                    for term in ['year', 'month', 'date'])]
     
-    # Set up progress tracking
-    preprocessing_steps = ['Loading data', 'Preprocessing', 'Feature engineering', 'Saving results']
-    progress_bar = tqdm(preprocessing_steps, desc="Training data processing")
+    if 'month' in df.columns and 'year' in df.columns:
+        # Create transaction date if month and year are available
+        try:
+            df['transaction_date'] = pd.to_datetime(
+                df['year'].astype(str) + '-' + df['month'].astype(str) + '-01'
+            )
+            logger.debug("Created transaction_date from year and month columns")
+        except Exception as e:
+            logger.warning(f"Could not create transaction_date: {e}")
     
-    # Load raw training data
-    progress_bar.set_description("Loading raw training data")
-    logger.info("Loading raw training data...")
-    try:
-        train_df = load_raw_data(data_paths["train"])
-        logger.info(f"Loaded {len(train_df)} records")
-        progress_bar.update(1)
-    except FileNotFoundError:
-        logger.error("Raw training data file not found!")
-        logger.error(f"Expected path: {data_paths['train']}")
-        progress_bar.close()
-        return None
-        
-    # Process training data
-    progress_bar.set_description("Preprocessing data")
-    logger.info("Preprocessing data...")
-    try:
-        # Preprocess data returns a tuple (X, y) for training data
-        preprocessed_data = preprocess_data(train_df, is_training=True)
-        
-        # Check if it's a tuple and handle accordingly
-        if isinstance(preprocessed_data, tuple):
-            X_preprocessed, y_preprocessed = preprocessed_data
-            # Create a DataFrame with both features and target for feature engineering
-            preprocessed_df = X_preprocessed.copy()
-            preprocessed_df['resale_price'] = y_preprocessed
-            logger.info(f"Data preprocessed, {len(preprocessed_df)} records remaining")
-        else:
-            preprocessed_df = preprocessed_data
-            logger.info(f"Data preprocessed, {len(preprocessed_df)} records remaining")
+    # Try to parse Tranc_YearMonth if available
+    if 'Tranc_YearMonth' in df.columns:
+        try:
+            df['transaction_date'] = pd.to_datetime(df['Tranc_YearMonth'])
             
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error during preprocessing: {e}")
-        logger.error(f"Exception details: {str(e)}")
-        logger.error(traceback.format_exc())
-        progress_bar.close()
-        return None
+            # Extract year, month from the date
+            df['transaction_year'] = df['transaction_date'].dt.year
+            df['transaction_month'] = df['transaction_date'].dt.month
+            df['transaction_quarter'] = df['transaction_date'].dt.quarter
+            
+            logger.debug("Created temporal features from Tranc_YearMonth")
+        except Exception as e:
+            logger.warning(f"Could not process Tranc_YearMonth: {e}")
+    
+    return df
+
+def engineer_property_features(df):
+    """
+    Engineer property-related features like age, remaining lease, etc.
+    
+    Args:
+        df: DataFrame with property attributes
+        
+    Returns:
+        DataFrame with additional property features
+    """
+    logger.info("Engineering property features...")
+    current_year = datetime.now().year
+    
+    # Calculate flat age if lease commence date is available
+    if 'lease_commence_date' in df.columns:
+        try:
+            # Calculate flat age at time of transaction
+            if 'transaction_year' in df.columns:
+                df['flat_age'] = df['transaction_year'] - df['lease_commence_date']
+            else:
+                df['flat_age'] = current_year - df['lease_commence_date']
+                
+            logger.debug("Added flat_age feature")
+        except Exception as e:
+            logger.warning(f"Could not calculate flat_age: {e}")
+    
+    # Parse remaining lease if available
+    if 'remaining_lease' in df.columns:
+        try:
+            # Extract years and months from the 'remaining_lease' string
+            # Pattern typically: "XX years YY months"
+            df['remaining_lease_years'] = df['remaining_lease'].str.extract(r'(\d+) years')
+            df['remaining_lease_years'] = pd.to_numeric(df['remaining_lease_years'][0], errors='coerce')
+            
+            df['remaining_lease_months'] = df['remaining_lease'].str.extract(r'(\d+) months')
+            df['remaining_lease_months'] = pd.to_numeric(df['remaining_lease_months'][0], errors='coerce')
+            
+            # Calculate total remaining lease in months
+            df['remaining_lease_total_months'] = (df['remaining_lease_years'] * 12 + 
+                                                df['remaining_lease_months'])
+                                                
+            logger.debug("Parsed remaining_lease into years and months")
+        except Exception as e:
+            logger.warning(f"Could not parse remaining_lease: {e}")
+    
+    # Process floor area if available
+    if 'floor_area_sqm' in df.columns:
+        try:
+            # Ensure floor area is numeric
+            df['floor_area_sqm'] = pd.to_numeric(df['floor_area_sqm'], errors='coerce')
+            
+            # Add floor area categories
+            bins = [0, 50, 75, 100, 125, 150, 200, np.inf]
+            labels = ['Tiny (≤50m²)', 'Small (51-75m²)', 'Medium (76-100m²)', 
+                     'Large (101-125m²)', 'XLarge (126-150m²)', 'Huge (151-200m²)', 'Mansion (>200m²)']
+            df['floor_area_category'] = pd.cut(df['floor_area_sqm'], bins=bins, labels=labels)
+            
+            logger.debug("Added floor_area_category feature")
+        except Exception as e:
+            logger.warning(f"Could not create floor area categories: {e}")
+    
+    return df
+
+def preprocess_dataset(df, is_training=True):
+    """
+    Preprocess a dataset with cleaning and feature engineering.
+    
+    This consolidated function handles both train and test data.
+    
+    Args:
+        df: Raw DataFrame to preprocess
+        is_training: Whether this is training data (includes target)
+    
+    Returns:
+        Preprocessed DataFrame
+    """
+    logger.info(f"Starting preprocessing for {'training' if is_training else 'testing'} data")
+    logger.info(f"Raw data shape: {df.shape}")
+    
+    # Clean the data first
+    df = clean_data(df)
+    logger.info(f"Data shape after cleaning: {df.shape}")
     
     # Engineer features
-    progress_bar.set_description("Engineering features")
-    logger.info("Engineering features...")
+    df = engineer_temporal_features(df)
+    df = engineer_property_features(df)
+    logger.info(f"Data shape after feature engineering: {df.shape}")
+    
+    # Extract feature information
+    feature_info = extract_features_info(df)
+    logger.info(f"Processed features: {feature_info['total_features']} total, " 
+               f"{feature_info['numerical_count']} numerical, "
+               f"{feature_info['categorical_count']} categorical")
+    
+    return df, feature_info
+
+def main(args):
+    """Main function to execute the preprocessing workflow."""
+    # Set up logging
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    setup_logging(log_level)
+    
+    logger.info("Starting HDB resale data preprocessing")
+    
     try:
-        # Extract feature configuration
-        features_config = model_config.get('features', {})
-        feature_selection_method = features_config.get('feature_selection', {}).get('method', 'f_regression')
-        feature_selection_k_best = features_config.get('feature_selection', {}).get('k_best', 20)
+        # Get data paths
+        data_paths = get_data_paths()
+        processed_dir = setup_directories()
         
-        # Convert k_best to percentile if needed
-        if isinstance(feature_selection_k_best, int) and feature_selection_k_best > 0 and feature_selection_k_best <= 100:
-            feature_selection_percentile = feature_selection_k_best
-        else:
-            feature_selection_percentile = 50  # Default to 50 percentile
-            
-        logger.info(f"Using feature selection: {feature_selection_method}, percentile: {feature_selection_percentile}")
+        # Load training data
+        train_path = data_paths["train"]
+        logger.info(f"Loading training data from {train_path}")
         
-        # Get preprocessor with configuration
-        preprocessor, numeric_features, categorical_features = engineer_features(
-            preprocessed_df, 
-            feature_selection_percentile=feature_selection_percentile,
-            show_progress=True,
-            config=model_config  # Pass the entire config to the function
-        )
-        
-        # Extract X and y for feature transformation
-        X = preprocessed_df.drop('resale_price', axis=1, errors='ignore')
-        y = preprocessed_df['resale_price'] if 'resale_price' in preprocessed_df.columns else None
-        
-        # Now fit_transform with the target variable explicitly passed
-        feature_matrix = preprocessor.fit_transform(X, y)
-        
-        # Debug the feature matrix
-        logger.info(f"Feature matrix type: {type(feature_matrix)}, shape: {feature_matrix.shape}")
-        
-        # Convert to DataFrame with appropriate column names
         try:
-            feature_names = []
-            
-            # Check if feature_matrix is actually a sparse matrix and convert it
-            if hasattr(feature_matrix, 'toarray'):
-                logger.info("Converting sparse matrix to dense array")
-                feature_matrix = feature_matrix.toarray()
-                logger.info(f"After conversion: shape {feature_matrix.shape}")
-            
-            # Try to get feature names from the preprocessor directly first
-            try:
-                if hasattr(preprocessor, 'get_feature_names_out'):
-                    feature_names = preprocessor.get_feature_names_out()
-                    logger.info(f"Got {len(feature_names)} feature names directly from preprocessor")
-            except Exception as e:
-                logger.warning(f"Couldn't get feature names directly: {e}")
-                
-            # Fallback to getting names from each transformer
-            if not feature_names:
-                for name, transformer, _ in preprocessor.transformers_:
-                    if name != 'remainder':  # Skip the 'remainder' transformer if present
-                        try:
-                            if hasattr(transformer, 'get_feature_names_out'):
-                                transformed_features = transformer.get_feature_names_out()
-                            elif hasattr(transformer, 'get_feature_names'):  # For older sklearn
-                                transformed_features = transformer.get_feature_names()
-                            else:
-                                logger.warning(f"Transformer {name} has no method to get feature names")
-                                continue
-                                
-                            logger.info(f"Got {len(transformed_features)} features from {name} transformer")
-                            feature_names.extend([f"{name}_{feature}" for feature in transformed_features])
-                        except AttributeError as e:
-                            # Some transformers may not have get_feature_names_out
-                            logger.warning(f"Could not get feature names for transformer {name}: {e}")
-            
-            # Ensure feature_matrix and feature_names match in length - using scalar comparisons
-            logger.info(f"Final feature matrix shape: {feature_matrix.shape}")
-            logger.info(f"Feature names count: {len(feature_names)}")
-            
-            # Debugging - Check the types of our values to ensure we're comparing scalars
-            feature_cols = int(feature_matrix.shape[1])  # Explicitly cast to int
-            feature_names_count = len(feature_names)     # Get the count as a scalar
-            
-            logger.debug(f"Feature columns: {feature_cols} (type: {type(feature_cols)})")
-            logger.debug(f"Feature names count: {feature_names_count} (type: {type(feature_names_count)})")
-            
-            # Safe comparison with scalars
-            if feature_names_count > 0:
-                # Another check to avoid array truth value ambiguity
-                if feature_cols != feature_names_count:
-                    logger.warning(f"Feature matrix columns ({feature_cols}) doesn't match feature names length ({feature_names_count})")
-                    logger.warning("Using generic column names instead")
-                    feature_names = [f'feature_{i}' for i in range(feature_cols)]
-            else:
-                logger.info("No feature names were found, using generic names")
-                feature_names = [f'feature_{i}' for i in range(feature_cols)]
-            
-            # Create DataFrame from the transformed features
-            logger.info(f"Creating DataFrame with {len(feature_names)} columns")
-            try:
-                # Check each component individually to avoid ambiguity
-                logger.debug(f"Feature matrix type: {type(feature_matrix)}")
-                logger.debug(f"Index type: {type(preprocessed_df.index)}, length: {len(preprocessed_df.index)}")
-                logger.debug(f"Feature names type: {type(feature_names)}, length: {len(feature_names)}")
-                
-                # Create the DataFrame with explicit parameter names
-                featured_df = pd.DataFrame(
-                    data=feature_matrix,
-                    index=preprocessed_df.index,
-                    columns=feature_names
-                )
-                logger.info(f"DataFrame created successfully with shape {featured_df.shape}")
-            except Exception as specific_e:
-                logger.warning(f"Specific DataFrame creation error: {specific_e}")
-                # Something might be wrong with feature_names, try again with a simpler approach
-                featured_df = pd.DataFrame(
-                    data=feature_matrix,
-                    index=preprocessed_df.index
-                )
-                # Add column names after creation
-                featured_df.columns = feature_names
-                logger.info(f"DataFrame created with post-assignment of columns, shape: {featured_df.shape}")
+            train_df = load_raw_data(train_path)
+            logger.info(f"Loaded training data with shape: {train_df.shape}")
+        except FileNotFoundError:
+            logger.error(f"Training data file not found at {train_path}")
+            return
         except Exception as e:
-            logger.warning(f"Error creating DataFrame with named columns: {e}")
-            logger.warning(f"Attempting fallback approach with generic column names")
+            logger.error(f"Error loading training data: {e}")
+            return
+        
+        # Preprocess training data
+        processed_train_df, train_features_info = preprocess_dataset(train_df, is_training=True)
+        logger.info(f"Training data preprocessing complete. Final shape: {processed_train_df.shape}")
+        
+        # Save feature info for debugging and documentation
+        if not args.no_save:
+            feature_info_path = processed_dir / "feature_info.json"
+            with open(feature_info_path, 'w', encoding='utf-8') as f:
+                json.dump(train_features_info, f, indent=2)
+            logger.info(f"Feature information saved to {feature_info_path}")
+        
+        # Check if test data exists and process it
+        test_path = data_paths["test"]
+        if os.path.exists(test_path):
+            logger.info(f"Loading test data from {test_path}")
             
-            # Ultra fallback - just create DataFrame with generic numbered columns
             try:
-                generic_cols = [f'feature_{i}' for i in range(feature_matrix.shape[1])]
-                featured_df = pd.DataFrame(
-                    feature_matrix, 
-                    index=preprocessed_df.index,
-                    columns=generic_cols
-                )
-                logger.info(f"Created DataFrame using fallback with shape {featured_df.shape}")
-            except Exception as e2:
-                logger.error(f"Even fallback approach failed: {e2}")
-                # Last resort - create without column names
-                featured_df = pd.DataFrame(feature_matrix)
-                featured_df.index = preprocessed_df.index
-                logger.warning(f"Created DataFrame without column specifications. Shape: {featured_df.shape}")
-        
-        logger.info(f"Features engineered, {featured_df.shape[1]} features created")
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error during feature engineering: {e}")
-        logger.error(f"Exception details: {str(e)}")
-        logger.error(traceback.format_exc())
-        progress_bar.close()
-        return None
-    
-    # Save processed data
-    progress_bar.set_description("Saving processed data")
-    logger.info("Saving processed data...")
-    try:
-        output_path = save_processed_data(featured_df, "train_processed.csv")
-        logger.info(f"Processed data saved to: {output_path}")
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error saving processed data: {e}")
-    
-    progress_bar.close()
-    return featured_df
-
-def process_test_data():
-    """
-    Process test data through preprocessing and feature engineering steps.
-    """
-    # Load configuration
-    model_config = load_config('model_config')
-    logger.info("Loaded model configuration for test data")
-    
-    # Get paths
-    data_paths = get_data_paths()
-    
-    # Set up progress tracking
-    preprocessing_steps = ['Loading data', 'Preprocessing', 'Feature engineering', 'Saving results']
-    progress_bar = tqdm(preprocessing_steps, desc="Test data processing")
-    
-    # Load raw test data
-    progress_bar.set_description("Loading raw test data")
-    logger.info("Loading raw test data...")
-    try:
-        test_df = load_raw_data(data_paths["test"])
-        logger.info(f"Loaded {len(test_df)} records")
-        progress_bar.update(1)
-    except FileNotFoundError:
-        logger.error("Raw test data file not found!")
-        logger.error(f"Expected path: {data_paths['test']}")
-        progress_bar.close()
-        return None
-    
-    # Preprocess the data
-    progress_bar.set_description("Preprocessing data")
-    logger.info("Preprocessing data...")
-    try:
-        # For test data, preprocess_data returns a DataFrame directly
-        preprocessed_df = preprocess_data(test_df, is_training=False)
-        logger.info(f"Data preprocessed, {len(preprocessed_df)} records remaining")
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error during preprocessing: {e}")
-        progress_bar.close()
-        return None
-    
-    # Engineer features
-    progress_bar.set_description("Engineering features")
-    logger.info("Engineering features...")
-    try:
-        # Extract feature configuration
-        features_config = model_config.get('features', {})
-        feature_selection_method = features_config.get('feature_selection', {}).get('method', 'f_regression')
-        feature_selection_k_best = features_config.get('feature_selection', {}).get('k_best', 20)
-        
-        # Convert k_best to percentile if needed
-        if isinstance(feature_selection_k_best, int) and feature_selection_k_best > 0 and feature_selection_k_best <= 100:
-            feature_selection_percentile = feature_selection_k_best
-        else:
-            feature_selection_percentile = 50  # Default to 50 percentile
-            
-        logger.info(f"Using feature selection: {feature_selection_method}, percentile: {feature_selection_percentile}")
-        
-        # Try to load the training data to fit the preprocessor first
-        try:
-            logger.info("Loading training data to fit the preprocessor...")
-            train_df = load_raw_data(data_paths["train"])
-            # Since preprocess_data returns a tuple for training data, we need to handle it properly
-            train_data = preprocess_data(train_df, is_training=True)
-            if isinstance(train_data, tuple):
-                X_train, y_train = train_data
-                # Add the target back to X for feature engineering
-                train_preprocessed_df = X_train.copy()
-                train_preprocessed_df['resale_price'] = y_train
-            else:
-                train_preprocessed_df = train_data
-            
-            # Get the preprocessor from the engineering function with configuration
-            preprocessor, numeric_features, categorical_features = engineer_features(
-                train_preprocessed_df, 
-                feature_selection_percentile=feature_selection_percentile,
-                show_progress=True,
-                config=model_config  # Pass the full configuration
-            )
-            
-            # Fit the preprocessor on training data - with target variable
-            logger.info("Fitting the preprocessor on training data...")
-            X_train = train_preprocessed_df.drop('resale_price', axis=1, errors='ignore')
-            y_train = train_preprocessed_df['resale_price'] if 'resale_price' in train_preprocessed_df.columns else None
-            
-            if y_train is None:
-                logger.warning("No target variable found in training data for fitting!")
-                raise ValueError("Target variable required for feature selection")
+                test_df = load_raw_data(test_path)
+                logger.info(f"Loaded test data with shape: {test_df.shape}")
                 
-            preprocessor.fit(X_train, y_train)
-            
-            # Now transform the test data (don't fit again)
-            logger.info("Transforming test data using the fitted preprocessor...")
-            feature_matrix = preprocessor.transform(preprocessed_df)
-            
-        except Exception as train_error:
-            # If we can't load training data, create a simplified preprocessor without feature selection
-            logger.warning(f"Could not load training data to fit preprocessor: {train_error}")
-            logger.warning("Creating simplified preprocessor for test data without feature selection...")
-            
-            # For test data only, we'll create a preprocessor without feature selection
-            # since feature selection requires target values
-            numeric_features = [col for col in preprocessed_df.columns if preprocessed_df[col].dtype in ['float64', 'int64']]
-            categorical_features = [col for col in preprocessed_df.columns if preprocessed_df[col].dtype == 'object']
-            
-            # Extract scaling method from config
-            scaling_method = features_config.get('scaling', 'standard')
-            
-            # Simplified preprocessor without feature selection
-            from sklearn.compose import ColumnTransformer
-            from sklearn.pipeline import Pipeline
-            from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder
-            from sklearn.impute import SimpleImputer
-            
-            # Choose scaler based on configuration
-            if scaling_method == 'minmax':
-                scaler = MinMaxScaler()
-            elif scaling_method == 'robust':
-                scaler = RobustScaler()
-            elif scaling_method == 'none':
-                scaler = None
-            else:  # Default to standard scaling
-                scaler = StandardScaler()
-            
-            # Build transformer pipelines using configuration
-            numeric_transformer = Pipeline(steps=[
-                ('imputer', SimpleImputer(strategy='mean')),
-                *([('scaler', scaler)] if scaler else [])
-            ])
-            
-            categorical_transformer = Pipeline(steps=[
-                ('encoder', OneHotEncoder(drop='first', handle_unknown='ignore'))
-            ])
-            
-            preprocessor = ColumnTransformer(
-                transformers=[
-                    ('num', numeric_transformer, numeric_features),
-                    ('cat', categorical_transformer, categorical_features)
-                ],
-                remainder='drop'
-            )
-            
-            # Fit and transform on test data
-            feature_matrix = preprocessor.fit_transform(preprocessed_df)
-        
-        # Debug the feature matrix
-        logger.info(f"Test feature matrix type: {type(feature_matrix)}, shape: {feature_matrix.shape}")
-        
-        # Convert to DataFrame with appropriate column names
-        try:
-            feature_names = []
-            
-            # Check if feature_matrix is actually a sparse matrix and convert it
-            if hasattr(feature_matrix, 'toarray'):
-                logger.info("Converting sparse matrix to dense array")
-                feature_matrix = feature_matrix.toarray()
-                logger.info(f"After conversion: shape {feature_matrix.shape}")
-            
-            # Try to get feature names from the preprocessor directly first
-            try:
-                if hasattr(preprocessor, 'get_feature_names_out'):
-                    feature_names = preprocessor.get_feature_names_out()
-                    logger.info(f"Got {len(feature_names)} feature names directly from preprocessor")
+                # Preprocess test data with same steps as training data
+                processed_test_df, _ = preprocess_dataset(test_df, is_training=False)
+                logger.info(f"Test data preprocessing complete. Final shape: {processed_test_df.shape}")
+                
+                # Save processed test data
+                if not args.no_save:
+                    test_output_path = processed_dir / "test_processed.csv"
+                    processed_test_df.to_csv(test_output_path, index=False)
+                    logger.info(f"Processed test data saved to {test_output_path}")
             except Exception as e:
-                logger.warning(f"Couldn't get feature names directly: {e}")
-                
-            # Fallback to getting names from each transformer
-            if not feature_names:
-                for name, transformer, _ in preprocessor.transformers_:
-                    if name != 'remainder':  # Skip the 'remainder' transformer if present
-                        try:
-                            if hasattr(transformer, 'get_feature_names_out'):
-                                transformed_features = transformer.get_feature_names_out()
-                            elif hasattr(transformer, 'get_feature_names'):  # For older sklearn
-                                transformed_features = transformer.get_feature_names()
-                            else:
-                                logger.warning(f"Transformer {name} has no method to get feature names")
-                                continue
-                                
-                            logger.info(f"Got {len(transformed_features)} features from {name} transformer")
-                            feature_names.extend([f"{name}_{feature}" for feature in transformed_features])
-                        except AttributeError as e:
-                            # Some transformers may not have get_feature_names_out
-                            logger.warning(f"Could not get feature names for transformer {name}: {e}")
-            
-            # Ensure feature_matrix and feature_names match in length - using scalar comparisons
-            logger.info(f"Final test feature matrix shape: {feature_matrix.shape}")
-            logger.info(f"Feature names count: {len(feature_names)}")
-            
-            # Debugging - Check the types of our values to ensure we're comparing scalars
-            feature_cols = int(feature_matrix.shape[1])  # Explicitly cast to int
-            feature_names_count = len(feature_names)     # Get the count as a scalar
-            
-            logger.debug(f"Test feature columns: {feature_cols} (type: {type(feature_cols)})")
-            logger.debug(f"Test feature names count: {feature_names_count} (type: {type(feature_names_count)})")
-            
-            # Safe comparison with scalars
-            if feature_names_count > 0:
-                # Another check to avoid array truth value ambiguity
-                if feature_cols != feature_names_count:
-                    logger.warning(f"Test feature matrix columns ({feature_cols}) doesn't match feature names length ({feature_names_count})")
-                    logger.warning("Using generic column names instead")
-                    feature_names = [f'feature_{i}' for i in range(feature_cols)]
-            else:
-                logger.info("No feature names were found, using generic names")
-                feature_names = [f'feature_{i}' for i in range(feature_cols)]
-            
-            # Create DataFrame from the transformed features
-            logger.info(f"Creating test DataFrame with {len(feature_names)} columns")
-            try:
-                # Check each component individually to avoid ambiguity
-                logger.debug(f"Test feature matrix type: {type(feature_matrix)}")
-                logger.debug(f"Test index type: {type(preprocessed_df.index)}, length: {len(preprocessed_df.index)}")
-                logger.debug(f"Test feature names type: {type(feature_names)}, length: {len(feature_names)}")
-                
-                # Create the DataFrame with explicit parameter names
-                featured_df = pd.DataFrame(
-                    data=feature_matrix,
-                    index=preprocessed_df.index,
-                    columns=feature_names
-                )
-                logger.info(f"Test DataFrame created successfully with shape {featured_df.shape}")
-            except Exception as specific_e:
-                logger.warning(f"Specific test DataFrame creation error: {specific_e}")
-                # Something might be wrong with feature_names, try again with a simpler approach
-                featured_df = pd.DataFrame(
-                    data=feature_matrix,
-                    index=preprocessed_df.index
-                )
-                # Add column names after creation
-                featured_df.columns = feature_names
-                logger.info(f"Test DataFrame created with post-assignment of columns, shape: {featured_df.shape}")
-        except Exception as e:
-            logger.warning(f"Error creating DataFrame with named columns: {e}")
-            logger.warning(f"Attempting fallback approach with generic column names")
-            
-            # Ultra fallback - just create DataFrame with generic numbered columns
-            try:
-                generic_cols = [f'feature_{i}' for i in range(feature_matrix.shape[1])]
-                featured_df = pd.DataFrame(
-                    feature_matrix, 
-                    index=preprocessed_df.index,
-                    columns=generic_cols
-                )
-                logger.info(f"Created test DataFrame using fallback with shape {featured_df.shape}")
-            except Exception as e2:
-                logger.error(f"Even fallback approach failed: {e2}")
-                # Last resort - create without column names
-                featured_df = pd.DataFrame(feature_matrix)
-                featured_df.index = preprocessed_df.index
-                logger.warning(f"Created test DataFrame without column specifications. Shape: {featured_df.shape}")
-        
-        logger.info(f"Features engineered, {featured_df.shape[1]} features created")
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error during feature engineering: {e}")
-        logger.error(f"Exception details: {str(e)}")
-        logger.error(traceback.format_exc())
-        progress_bar.close()
-        return None
-    
-    # Save processed data
-    progress_bar.set_description("Saving processed data")
-    logger.info("Saving processed data...")
-    try:
-        output_path = save_processed_data(featured_df, "test_processed.csv")
-        logger.info(f"Processed data saved to: {output_path}")
-        progress_bar.update(1)
-    except Exception as e:
-        logger.error(f"Error saving processed data: {e}")
-    
-    progress_bar.close()
-    return featured_df
-
-def generate_dataset_description(df, filename):
-    """
-    Generate and save a description of the dataset
-    """
-    if df is None:
-        return
-        
-    # Generate description statistics and metadata
-    description = f"""
-# HDB Resale Price Dataset Description
-
-## Overview
-- Total records: {df.shape[0]}
-- Number of features: {df.shape[1]}
-
-## Features
-{pd.DataFrame({'Feature': df.columns, 'Non-Null Count': df.count().values, 
-               'Data Type': df.dtypes.values}).to_string(index=False)}
-
-## Summary Statistics
-{df.describe().round(2).to_string()}
-    """
-    
-    # Save description
-    data_paths = get_data_paths()
-    
-    # Make sure we're using the parent directory of processed, not the raw file path
-    processed_dir = os.path.dirname(data_paths['processed']) if os.path.isfile(data_paths['processed']) else data_paths['processed']
-    desc_path = os.path.join(processed_dir, filename)
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(desc_path), exist_ok=True)
-    
-    with open(desc_path, 'w') as f:
-        f.write(description)
-    logger.info(f"Dataset description saved to {desc_path}")
-
-def main():
-    """
-    Main execution function for data preprocessing
-    """
-    parser = argparse.ArgumentParser(description='Process data for HDB resale price prediction')
-    parser.add_argument('--train', action='store_true', help='Process training data')
-    parser.add_argument('--test', action='store_true', help='Process test data')
-    
-    args = parser.parse_args()
-    
-    # If no args specified, process both
-    process_all = not args.train and not args.test
-    
-    logger.info("Starting data preprocessing")
-    
-    # Process training data if requested or if no specific argument given
-    if args.train or process_all:
-        logger.info("Processing training data...")
-        train_df = process_training_data()
-        if train_df is not None:
-            generate_dataset_description(train_df, "train_description.md")
-            logger.info("Training data processing complete!")
+                logger.error(f"Error processing test data: {e}")
         else:
-            logger.error("Failed to process training data")
-    
-    # Process test data if requested or if no specific argument given
-    if args.test or process_all:
-        logger.info("Processing test data...")
-        test_df = process_test_data()
-        if test_df is not None:
-            generate_dataset_description(test_df, "test_description.md")
-            logger.info("Test data processing complete!")
-        else:
-            logger.error("Failed to process test data")
-    
-    logger.info("Data preprocessing completed")
+            logger.warning(f"Test data file not found at {test_path}. Skipping test processing.")
+            
+            # Create a test set from training data if test file doesn't exist
+            logger.info("Creating test set from training data using train-test split")
+            split_size = 0.2  # Use 20% for test
+            
+            try:
+                if 'resale_price' in processed_train_df.columns:
+                    # Split the data with stratification if possible
+                    X = processed_train_df.drop(columns=['resale_price'])
+                    y = processed_train_df['resale_price']
+                    
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=split_size, random_state=42
+                    )
+                    
+                    # Reconstruct complete dataframes
+                    processed_train_split = pd.concat([X_train, y_train], axis=1)
+                    processed_test_df = pd.concat([X_test, y_test], axis=1)
+                    
+                    # Replace the original train DataFrame with the split version
+                    processed_train_df = processed_train_split
+                    
+                    logger.info(f"Created test set with {len(processed_test_df)} samples")
+                    
+                    # Save the split test data
+                    if not args.no_save:
+                        test_output_path = processed_dir / "test_split.csv"
+                        processed_test_df.to_csv(test_output_path, index=False)
+                        logger.info(f"Split test data saved to {test_output_path}")
+                else:
+                    logger.warning("No 'resale_price' column found. Cannot split data.")
+            except Exception as e:
+                logger.error(f"Error splitting data: {e}")
+        
+        # Save processed training data
+        if not args.no_save:
+            train_output_path = processed_dir / "train_processed.csv" 
+            processed_train_df.to_csv(train_output_path, index=False)
+            logger.info(f"Processed training data saved to {train_output_path}")
+        
+        logger.info("Preprocessing completed successfully!")
+        
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred during preprocessing: {e}")
+        raise
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Preprocess HDB resale data")
+    parser.add_argument("--no-save", action="store_true", help="Run without saving outputs")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    args = parser.parse_args()
+    
+    main(args)
