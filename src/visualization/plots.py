@@ -232,8 +232,51 @@ def plot_price_by_flat_type(df: pd.DataFrame) -> plt.Figure:
         >>> # Save the figure to a file
         >>> fig.savefig('outputs/price_by_flat_type.png', dpi=300, bbox_inches='tight')
     """
-    # Define flat type order
-    flat_type_order = ['1 ROOM', '2 ROOM', '3 ROOM', '4 ROOM', '5 ROOM', 'EXECUTIVE', 'MULTI-GENERATION']
+    # Check if required columns exist and handle error gracefully
+    if 'flat_type' not in df.columns or 'resale_price' not in df.columns:
+        # Create a simple error message plot as fallback
+        fig, ax = plt.subplots(figsize=(12, 6))
+        missing_cols = []
+        if 'flat_type' not in df.columns:
+            missing_cols.append('flat_type')
+        if 'resale_price' not in df.columns:
+            missing_cols.append('resale_price')
+        
+        ax.text(0.5, 0.5, f"Cannot generate plot: Missing columns {', '.join(missing_cols)}",
+                ha='center', va='center', fontsize=14)
+        ax.set_axis_off()
+        return fig
+    
+    # Check if flat_type column has values that can be used in our order list
+    # and if there are enough unique values to make a meaningful boxplot
+    if df['flat_type'].nunique() <= 1:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.text(0.5, 0.5, "Not enough unique flat types to create a boxplot",
+                ha='center', va='center', fontsize=14)
+        ax.set_axis_off()
+        return fig
+    
+    # Define flat type order - but only use values that exist in the data
+    standard_order = ['1 ROOM', '2 ROOM', '3 ROOM', '4 ROOM', '5 ROOM', 'EXECUTIVE', 'MULTI-GENERATION']
+    
+    # Filter to only include flat types that exist in our data
+    existing_types = df['flat_type'].unique()
+    flat_type_order = [ft for ft in standard_order if ft in existing_types]
+    
+    # If none of our standard types exist, just use whatever exists in the data
+    if not flat_type_order:
+        flat_type_order = sorted(existing_types)
+    
+    # Ensure we only plot data for flat types in our order list
+    df_filtered = df[df['flat_type'].isin(flat_type_order)]
+    
+    # If after filtering we have no data, show an error message
+    if len(df_filtered) == 0:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.text(0.5, 0.5, "No data available for the defined flat types",
+                ha='center', va='center', fontsize=14)
+        ax.set_axis_off()
+        return fig
     
     # Plot
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -241,7 +284,7 @@ def plot_price_by_flat_type(df: pd.DataFrame) -> plt.Figure:
     sns.boxplot(
         y='flat_type',
         x='resale_price',
-        data=df,
+        data=df_filtered,
         ax=ax,
         order=flat_type_order
     )
