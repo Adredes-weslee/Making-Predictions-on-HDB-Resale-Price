@@ -13,111 +13,76 @@ The script will report on:
 2. Required package installation status
 3. Project directory structure
 4. Availability of required model files
+5. Availability of data files
 """
-import os
 import sys
 import importlib
-import subprocess
 from pathlib import Path
 
 def check_python_version():
-    """
-    Check if Python version meets requirements
-    
-    Verifies that the current Python version is compatible with the project
-    requirements. The project was developed with Python 3.8+, so this function
-    warns if an older version is being used.
-    """
-    print(f"Python version: {sys.version}")
-    major, minor, *_ = sys.version_info
-    if major != 3 or minor < 8:
-        print("⚠️ Warning: This project was developed with Python 3.8+. Some features may not work correctly.")
+    """Check if the Python version is compatible with the project."""
+    print("Checking Python version:")
+    version = sys.version_info
+    if version.major == 3 and version.minor >= 7:
+        print(f"✅ Python version {version.major}.{version.minor}.{version.micro} is compatible")
     else:
-        print("✅ Python version: OK")
+        print(f"❌ Python version {version.major}.{version.minor}.{version.micro} is not compatible - please use Python 3.7+")
 
 def check_required_packages():
-    """
-    Check if required packages are installed
-    
-    Attempts to import each required package and reports on whether
-    it is installed and its version.
-    """
+    """Check if required packages are installed."""
     required_packages = [
-        'pandas', 'numpy', 'matplotlib', 'seaborn', 'streamlit', 'plotly',
-        'sklearn', 'pathlib', 'yaml', 'statsmodels', 'unittest'
+        'numpy',
+        'pandas',
+        'matplotlib',
+        'seaborn',
+        'sklearn',
+        'streamlit',
+        'plotly',
+        'pyyaml'
     ]
     
+    print("\nChecking required packages:")
     missing_packages = []
     
-    print("\nChecking required packages:")
     for package in required_packages:
         try:
-            if package == 'sklearn':
-                module = importlib.import_module('sklearn')
-                import sklearn
-                version = getattr(sklearn, '__version__', 'unknown')
-            else:
-                module = importlib.import_module(package)
-                version = getattr(module, '__version__', 'unknown')
-            print(f"✅ {package}: {version}")
+            importlib.import_module(package)
+            print(f"✅ {package}")
         except ImportError:
             print(f"❌ {package}: Not installed")
             missing_packages.append(package)
     
     if missing_packages:
-        print("\n⚠️ Missing packages:")
-        print("Run the following command to install them:")
+        print("\nMissing packages. Install them with:")
         print(f"pip install {' '.join(missing_packages)}")
-    else:
-        print("\n✅ All required packages are installed")
 
 def check_directory_structure():
-    """
-    Check if the directory structure is correct
-    
-    Verifies that all required directories for the project exist.
-    Creates missing directories if they don't exist.
-    """
-    project_root = Path(__file__).parent.parent
-    expected_dirs = [
-        'app',
-        'app/components', 
-        'app/pages',
-        'src',
-        'src/data',
-        'src/models',
-        'src/visualization',
-        'src/utils',
+    """Check if the project directory structure is set up correctly."""
+    base_dir = Path(__file__).parent.parent
+    required_dirs = [
         'data',
         'data/raw',
         'data/processed',
         'models',
         'configs',
-        'tests',
-        'scripts',
-        'notebooks'
+        'app',
+        'src'
     ]
     
     print("\nChecking directory structure:")
-    for dir_path in expected_dirs:
-        full_path = project_root / dir_path
-        if full_path.exists():
-            print(f"✅ {dir_path}: OK")
+    for dir_name in required_dirs:
+        dir_path = base_dir / dir_name
+        if dir_path.exists():
+            print(f"✅ {dir_name}/")
         else:
-            print(f"❌ {dir_path}: Missing")
-            try:
-                full_path.mkdir(parents=True, exist_ok=True)
-                print(f"  📂 Created {dir_path}")
-            except Exception as e:
-                print(f"  ⚠️ Could not create {dir_path}: {e}")
+            print(f"❌ {dir_name}/: Missing - creating...")
+            dir_path.mkdir(parents=True, exist_ok=True)
+            print(f"  ✓ Created {dir_name}/")
 
 def check_config_files():
-    """
-    Check if the necessary configuration files exist
-    
-    Verifies that all required configuration files are present.
-    """
-    config_dir = Path(__file__).parent.parent / 'configs'
+    """Check if configuration files exist."""
+    base_dir = Path(__file__).parent.parent
+    config_dir = base_dir / 'configs'
     required_files = [
         'app_config.yaml',
         'model_config.yaml'
@@ -127,7 +92,7 @@ def check_config_files():
     for file in required_files:
         file_path = config_dir / file
         if file_path.exists():
-            print(f"✅ {file}: OK")
+            print(f"✅ {file}")
         else:
             print(f"❌ {file}: Missing")
 
@@ -144,7 +109,7 @@ def check_model_files():
         print(f"❌ Models directory does not exist")
         return
         
-    model_files = list(model_dir.glob('*.pk1'))
+    model_files = list(model_dir.glob('*.pkl'))
     if model_files:
         print(f"✅ Found {len(model_files)} model files")
         for model in model_files[:5]:  # Show only first 5 models
@@ -153,7 +118,40 @@ def check_model_files():
             print(f"  - ... and {len(model_files) - 5} more")
     else:
         print(f"❌ No model files found! You may need to train models first.")
-        print("  Run 'python scripts/train_models.py' to train the models")
+        print("  Run 'python scripts/train_pipeline_model.py' to train the models")
+    
+    # Check for feature schema files
+    schema_files = list(model_dir.glob('*.json'))
+    if schema_files:
+        print(f"✅ Found {len(schema_files)} feature schema files")
+    else:
+        print("⚠️ No feature schema files found. Feature name consistency may be an issue.")
+
+def check_data_files():
+    """
+    Check if the necessary data files exist in data/raw directory
+    """
+    data_dir = Path(__file__).parent.parent / 'data' / 'raw'
+    
+    print("\nChecking data files:")
+    if not data_dir.exists():
+        print(f"❌ Data directory {data_dir} does not exist")
+        return
+        
+    # Check for common data file formats
+    data_files = list(data_dir.glob('*.csv'))
+    data_files.extend(list(data_dir.glob('*.xlsx')))
+    data_files.extend(list(data_dir.glob('*.parquet')))
+    
+    if data_files:
+        print(f"✅ Found {len(data_files)} data files")
+        for data_file in data_files[:5]:  # Show only first 5 files
+            print(f"  - {data_file.name}")
+        if len(data_files) > 5:
+            print(f"  - ... and {len(data_files) - 5} more")
+    else:
+        print(f"❌ No data files found in {data_dir}")
+        print("  Please add your raw data files to the data/raw directory")
 
 def check_streamlit():
     """
@@ -163,19 +161,22 @@ def check_streamlit():
     """
     print("\nChecking Streamlit installation:")
     try:
-        result = subprocess.run(
-            ['streamlit', '--version'], 
-            capture_output=True, 
-            text=True
-        )
-        print(f"✅ Streamlit is installed: {result.stdout.strip()}")
-    except Exception as e:
-        print(f"❌ Error checking Streamlit: {e}")
+        import streamlit
+        print(f"✅ Streamlit v{streamlit.__version__} is installed")
+        
+        # Check if the main app.py file exists
+        app_path = Path(__file__).parent.parent / 'app.py'
+        if app_path.exists():
+            print(f"✅ Streamlit app file found: {app_path.name}")
+            print("  Run with: streamlit run app.py")
+        else:
+            print(f"❌ Streamlit app file not found at {app_path}")
+    except ImportError:
+        print("❌ Streamlit is not installed")
+        print("  Install with: pip install streamlit")
 
 def main():
-    """
-    Main function to run all checks
-    """
+    """Run all environment verification checks."""
     print("=" * 60)
     print("HDB Resale Price Prediction - Environment Verification")
     print("=" * 60)
@@ -185,17 +186,12 @@ def main():
     check_directory_structure()
     check_config_files()
     check_model_files()
+    check_data_files()  # New function to check data files
     check_streamlit()
     
     print("\n" + "=" * 60)
     print("Verification complete!")
     print("=" * 60)
-    print("\nIf you need to generate processed data, run:")
-    print("  python scripts/process_data.py")
-    print("\nTo train models, run:")
-    print("  python scripts/train_models.py")
-    print("\nTo start the Streamlit application, run:")
-    print("  streamlit run app/main.py")
 
 if __name__ == "__main__":
     main()
