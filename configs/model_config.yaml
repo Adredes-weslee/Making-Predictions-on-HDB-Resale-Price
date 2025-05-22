@@ -7,7 +7,7 @@ features:
   feature_selection:
     enabled: true
     method: "f_regression"
-    percentile: 95   # Number of top features to select
+    percentile: 99   # Number of top features to select
   
     numerical_features:
     - "lease_commence_date"
