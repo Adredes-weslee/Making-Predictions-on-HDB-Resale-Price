@@ -7,19 +7,26 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import sys
 from pathlib import Path
 import joblib
 import pickle
 import json
 from datetime import datetime
 
+# Add the src directory to Python path to import preprocessing functions
+root_dir = Path(__file__).parent.parent.parent
+src_path = os.path.join(root_dir, 'src')
+if src_path not in sys.path:
+    sys.path.append(src_path)
+
+from src.data.preprocessing_pipeline import create_date_features, create_age_features
+
+
+
 @st.cache_data
 def load_towns_and_features():
-    """Load unique values for towns and other feature options.
-    
-    Returns:
-        dict: Dictionary with feature options
-    """
+    """Load unique values for towns and other feature options."""
     try:
         # Get data directory
         root_dir = Path(__file__).parent.parent.parent
@@ -29,104 +36,103 @@ def load_towns_and_features():
             # Fall back to exploratory file if pipeline file doesn't exist
             data_path = os.path.join(root_dir, 'data', 'processed', 'train_processed_exploratory.csv')
             
-        # Load a sample of the data with low_memory=False
+        # Load a sample of the data
         df = pd.read_csv(data_path, nrows=10000, low_memory=False)
         
         # Extract unique values for categorical features
         feature_options = {}
         
-        if 'town' in df.columns:
-            feature_options['towns'] = sorted(df['town'].unique().tolist())
-            
-        if 'flat_type' in df.columns:
-            feature_options['flat_types'] = sorted(df['flat_type'].unique().tolist())
-            
-        if 'storey_range' in df.columns:
-            feature_options['storey_ranges'] = sorted(df['storey_range'].unique().tolist())
-            
-        if 'flat_model' in df.columns:
-            feature_options['flat_models'] = sorted(df['flat_model'].unique().tolist())
-            
-        # Get numerical feature ranges - with additional error handling
-        num_features = ['floor_area_sqft', 'remaining_lease']
-        for feat in num_features:
-            if feat in df.columns:
+        # Categorical features from your reduced dataset
+        categorical_cols = ['town', 'flat_type', 'flat_model', 'storey_range', 'full_flat_type', 'mrt_name']
+        
+        for col in categorical_cols:
+            if col in df.columns:
+                feature_options[col] = sorted(df[col].unique().tolist())
+        
+        # Numerical feature ranges
+        numerical_cols = ['floor_area_sqm', 'remaining_lease', 'max_floor_lvl', 'Mall_Nearest_Distance', 
+                         'Hawker_Nearest_Distance', 'mrt_nearest_distance', 'bus_stop_nearest_distance',
+                         'pri_sch_nearest_distance', 'sec_sch_nearest_dist', 'cutoff_point']
+        
+        for col in numerical_cols:
+            if col in df.columns:
                 try:
-                    # Explicitly convert to float to ensure single values
-                    feature_options[f'{feat}_min'] = float(df[feat].min())
-                    feature_options[f'{feat}_max'] = float(df[feat].max())
-                except Exception as e:
-                    # Use safe defaults if conversion fails
-                    if feat == 'floor_area_sqft':
-                        feature_options[f'{feat}_min'] = 300.0
-                        feature_options[f'{feat}_max'] = 2000.0
-                    elif feat == 'remaining_lease':
-                        feature_options[f'{feat}_min'] = 40.0
-                        feature_options[f'{feat}_max'] = 99.0
-                
+                    feature_options[f'{col}_min'] = float(df[col].min())
+                    feature_options[f'{col}_max'] = float(df[col].max())
+                    feature_options[f'{col}_mean'] = float(df[col].mean())
+                except:
+                    # Set safe defaults
+                    defaults = {
+                        'floor_area_sqm': (28, 186, 90),
+                        'remaining_lease': (40, 99, 70),
+                        'max_floor_lvl': (3, 50, 12),
+                        'Mall_Nearest_Distance': (0, 5000, 800),
+                        'Hawker_Nearest_Distance': (0, 3000, 300),
+                        'mrt_nearest_distance': (0, 5000, 600),
+                        'bus_stop_nearest_distance': (0, 1000, 150),
+                        'pri_sch_nearest_distance': (0, 3000, 400),
+                        'sec_sch_nearest_dist': (0, 5000, 500),
+                        'cutoff_point': (150, 280, 200)
+                    }
+                    if col in defaults:
+                        feature_options[f'{col}_min'] = defaults[col][0]
+                        feature_options[f'{col}_max'] = defaults[col][1]
+                        feature_options[f'{col}_mean'] = defaults[col][2]
+        
         return feature_options
         
     except Exception as e:
         st.error(f"Error loading feature options: {str(e)}")
         return {}
 
-def prepare_features_for_prediction(input_data, model_features):
-    """
-    Prepare input data for prediction by ensuring all required columns exist.
-    
-    Args:
-        input_data: Dictionary or DataFrame of input features
-        model_features: Feature info from the loaded model
-        
-    Returns:
-        pd.DataFrame: DataFrame with all required columns
-    """
-    # Convert to DataFrame if it's a dictionary
+def prepare_features_for_prediction(input_data):
+    """Prepare input data using the SAME preprocessing pipeline as training."""
     if isinstance(input_data, dict):
         input_df = pd.DataFrame([input_data])
     else:
         input_df = input_data.copy()
     
-    # Get the list of required columns from model_features if available
-    required_columns = model_features.get('all_features', None) if model_features else None
+    # Create Tranc_YearMonth column for preprocessing pipeline
+    if 'year' in input_df.columns and 'month' in input_df.columns:
+        input_df['Tranc_YearMonth'] = pd.to_datetime(
+            input_df[['year', 'month']].assign(day=1)
+        )
     
-    # If we don't have the feature list, use the default list (as you already have)
-    if not required_columns:
-        # Your existing default columns list is fine here
-        required_columns = [
-            'town', 'flat_type', 'flat_model', 'storey_range', 'floor_area_sqft', 'floor_area_sqm', 'remaining_lease',
-            'transaction_month', 'transaction_year', 'Hawker_Nearest_Distance', 'bus_stop_longitude',
-            'sec_sch_nearest_dist', 'block', 'hawker_market_stalls', 'lease_commence_date', '1room_sold',
-            'lower', 'Tranc_YearMonth', 'Latitude', 'Hawker_Within_1km', 'exec_sold', 'upper', 'postal',
-            'hdb_age', 'commercial', '5room_sold', 'affiliation', 'cutoff_point', 'bus_interchange',
-            'mid', 'pri_sch_nearest_distance', 'Mall_Within_500m', 'bus_stop_latitude', 'multistorey_carpark',
-            'mrt_longitude', 'residential', 'Longitude', 'Tranc_Month', 'Tranc_Year',
-            'address', 'sec_sch_longitude', 'vacancy', 'market_hawker', '3room_sold', '3room_rental',
-            'Hawker_Within_2km', 'mrt_interchange', 'bus_stop_name', '2room_sold',
-            'bus_stop_nearest_distance', 'mrt_nearest_distance', 'hawker_food_stalls',
-            'studio_apartment_sold', 'pri_sch_latitude', 'sec_sch_latitude', 'pri_sch_name',
-            'mid_storey', 'precinct_pavilion', 'street_name', 'other_room_rental', '4room_sold',
-            'Mall_Within_1km', '2room_rental', 'id', 'mrt_name', 'planning_area', 'mrt_latitude',
-            'pri_sch_affiliation', 'total_dwelling_units', 'Mall_Nearest_Distance', 'max_floor_lvl',
-            'pri_sch_longitude', 'Mall_Within_2km', 'year_completed', 'multigen_sold', 'Hawker_Within_500m',
-            'full_flat_type', '1room_rental', 'sec_sch_name'
-        ]
+    # Apply the SAME preprocessing functions used during training
+    input_df = create_date_features(input_df)    # This creates year, month from Tranc_YearMonth
+    input_df = create_age_features(input_df)     # This creates building_age, remaining_lease, lease_decay
     
-    # Get categorical features if available
-    categorical_features = model_features.get('categorical_features', []) if model_features else []
+    # Ensure proper data types
+    categorical_features = ["town", "flat_type", "storey_range", "flat_model", "market_hawker", 
+                           "multistorey_carpark", "precinct_pavilion", "mrt_name", "bus_interchange", 
+                           "mrt_interchange", "pri_sch_affiliation", "affiliation"]
     
-    # Add missing columns with numeric default values (0 for everything)
-    for col in required_columns:
-        if col not in input_df.columns:
-            # Use 0 for all missing columns
-            # Pipeline will handle transformations for categorical columns
-            input_df[col] = 0
+    numerical_features = ["floor_area_sqm", "lease_commence_date", "hdb_age", "max_floor_lvl", 
+                         "Mall_Nearest_Distance", "Hawker_Nearest_Distance", "mrt_nearest_distance", 
+                         "bus_stop_nearest_distance", "pri_sch_nearest_distance", "sec_sch_nearest_dist", 
+                         "cutoff_point", "year", "month", "building_age", "remaining_lease", "lease_decay"]
     
-    # Handle categorical values that exist in input data
-    # Explicitly convert categorical columns to string type since we provided numeric defaults
+    # Convert data types
     for col in categorical_features:
         if col in input_df.columns:
             input_df[col] = input_df[col].astype(str)
+    
+    for col in numerical_features:
+        if col in input_df.columns:
+            input_df[col] = pd.to_numeric(input_df[col], errors='coerce').fillna(0.0).astype(float)
+    
+    # Ensure column order matches training data (all_features from JSON)
+    expected_columns = ["town", "flat_type", "storey_range", "floor_area_sqm", "flat_model", 
+                       "lease_commence_date", "hdb_age", "max_floor_lvl", "market_hawker", 
+                       "multistorey_carpark", "precinct_pavilion", "Mall_Nearest_Distance", 
+                       "Hawker_Nearest_Distance", "mrt_nearest_distance", "mrt_name", "bus_interchange", 
+                       "mrt_interchange", "bus_stop_nearest_distance", "pri_sch_nearest_distance", 
+                       "pri_sch_affiliation", "sec_sch_nearest_dist", "cutoff_point", "affiliation", 
+                       "year", "month", "building_age", "remaining_lease", "lease_decay"]
+    
+    # Reorder columns to match training
+    available_columns = [col for col in expected_columns if col in input_df.columns]
+    input_df = input_df[available_columns]
     
     return input_df
 
@@ -135,47 +141,53 @@ def make_prediction(input_data, models_dict, model_type='ridge'):
     try:
         # Check if model exists
         pipeline_key = f"{model_type}_pipeline"
-        model_key = f"{model_type}_model"
-        features_key = f"{model_type}_features"
         
-        # Get model features if available
-        model_features = models_dict.get(features_key, None)
-        
-        # First try to use pipeline if available (preferred method)
         if pipeline_key in models_dict and models_dict[pipeline_key] is not None:
             # Get the pipeline
             pipeline = models_dict[pipeline_key]
             
-            # Prepare input data as DataFrame with all required columns
-            input_df = prepare_features_for_prediction(input_data, model_features)
-            
-            # Use pipeline to transform and predict
-            predicted_price = pipeline.predict(input_df)[0]
-        
-        # Fall back to direct model prediction if pipeline not available
-        elif model_key in models_dict and models_dict[model_key] is not None:
-            # Get the model
-            model = models_dict[model_key]
-            
             # Prepare input data
-            input_df = prepare_features_for_prediction(input_data, model_features)
+            input_df = prepare_features_for_prediction(input_data)
+            
+            # Debug section
+            with st.expander("Debug Info", expanded=True):  # Make it expanded to see the issue
+                st.markdown("### Input Data After Preparation")
+                st.dataframe(input_df)
+                
+                # Show data types
+                st.markdown("### Data Types")
+                dtypes_df = pd.DataFrame({
+                    'Column': input_df.columns,
+                    'Data Type': [str(dtype) for dtype in input_df.dtypes],
+                    'Sample Value': [str(input_df[col].iloc[0]) for col in input_df.columns]
+                })
+                st.dataframe(dtypes_df)
+                
+                # Check for problematic values
+                st.markdown("### Potential Issues")
+                for col in input_df.columns:
+                    val = input_df[col].iloc[0]
+                    if pd.isna(val):
+                        st.error(f"❌ {col}: Contains NaN value")
+                    elif str(val) in ['nan', 'None', 'inf', '-inf']:
+                        st.error(f"❌ {col}: Contains problematic value '{val}'")
+                    else:
+                        st.success(f"✅ {col}: {type(val).__name__} = '{val}'")
             
             # Make prediction
-            predicted_price = model.predict(input_df)[0]
-        
+            predicted_price = pipeline.predict(input_df)[0]
+                
         else:
             return None, {"error": f"Model '{model_type}' not available"}
         
-        # Get model metrics for context - with extra safety check
+        # Get model metrics
         model_metrics = models_dict.get(f"{model_type}_metrics", {})
-        if model_metrics is None:  # Extra defensive check
+        if model_metrics is None:
             model_metrics = {}
-            
-        # Now safely access metrics with defaults
+        
         model_r2 = model_metrics.get('test_r2', 0)
         model_rmse = model_metrics.get('test_rmse', 0)
         
-        # Prepare additional information
         info = {
             "predicted_price": predicted_price,
             "model_type": model_type,
@@ -192,13 +204,12 @@ def make_prediction(input_data, models_dict, model_type='ridge'):
         return None, {"error": str(e)}
 
 def show_prediction():
-    """Display the prediction interface."""
+    """Display the prediction interface - ONLY collect base features from JSON."""
     # Header
     st.markdown("<h1 class='main-header'>Make Prediction</h1>", unsafe_allow_html=True)
     
     st.markdown("""
-    Enter property details below to get a predicted resale price. The prediction is based on
-    historical transaction data and uses machine learning models to estimate the most likely price.
+    Enter property details below to get a predicted resale price. Only base features are collected - derived features are calculated automatically.
     """)
     
     # Load feature options
@@ -211,103 +222,163 @@ def show_prediction():
         
     models_dict = st.session_state['models']
     
-    # Form with property inputs
+    # Form with ONLY base features needed
     with st.form("prediction_form"):
-        # Layout in columns
-        col1, col2 = st.columns(2)
+        st.markdown("### Property Information")
+        
+        # Layout in 3 columns
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Location details
-            st.subheader("Location")
+            st.markdown("**Location & Type**")
             
             town = st.selectbox(
                 "Town",
-                options=feature_options.get('towns', ['ANG MO KIO', 'BEDOK', 'BISHAN']),
+                options=feature_options.get('town', ['ANG MO KIO']),
                 index=0
             )
             
-            # Property details
-            st.subheader("Property Details")
-            
             flat_type = st.selectbox(
                 "Flat Type",
-                options=feature_options.get('flat_types', ['1 ROOM', '2 ROOM', '3 ROOM', '4 ROOM', '5 ROOM', 'EXECUTIVE']),
-                index=3
+                options=feature_options.get('flat_type', ['4 ROOM']),
+                index=0
             )
             
             flat_model = st.selectbox(
-                "Flat Model",
-                options=feature_options.get('flat_models', ['Improved', 'New Generation', 'Standard']),
+                "Flat Model", 
+                options=feature_options.get('flat_model', ['Improved']),
                 index=0
             )
             
             storey_range = st.selectbox(
                 "Storey Range",
-                options=feature_options.get('storey_ranges', ['01 TO 03', '04 TO 06', '07 TO 09', '10 TO 12', '13 TO 15', '16 TO 18', '19 TO 21']),
-                index=2
+                options=feature_options.get('storey_range', ['04 TO 06']),
+                index=0
             )
-            
+        
         with col2:
-            # Physical attributes section in col2:
-            st.subheader("Physical Attributes")
-
-            # Fix for the type mismatch error
-            try:
-                # Get floor area min/max, ensuring they are single float values
-                floor_area_min = float(feature_options.get('floor_area_sqft_min', 300))
-                floor_area_max = float(feature_options.get('floor_area_sqft_max', 2000))
-                
-                # Ensure min doesn't exceed max
-                if floor_area_min > floor_area_max:
-                    floor_area_min, floor_area_max = 300, 2000
-                
-                # Default value must be a single number, not a list
-                default_area = 970  # Default value (~90 sqm converted to sqft)
-                
-                # Ensure default is within range
-                default_area = max(floor_area_min, min(default_area, floor_area_max))
-                
-                floor_area_sqft = st.slider(
-                    "Floor Area (sqft)",
-                    min_value=floor_area_min,
-                    max_value=floor_area_max,
-                    value=default_area,
-                    step=10.0
-                )
-            except Exception as e:
-                # Fallback to safe defaults if any error occurs
-                st.warning(f"Using default area range due to: {str(e)}")
-                floor_area_sqft = st.slider(
-                    "Floor Area (sqft)",
-                    min_value=300.0,
-                    max_value=2000.0,
-                    value=970.0,
-                    step=10.0
-                )
-                        
-            # Lease details
-            st.subheader("Lease Information")
+            st.markdown("**Physical Attributes**")
             
-            lease_min = feature_options.get('remaining_lease_min', 40)
-            lease_max = feature_options.get('remaining_lease_max', 99)
-            
-            remaining_lease = st.slider(
-                "Remaining Lease (years)",
-                min_value=lease_min,
-                max_value=lease_max,
-                value=70.0,
+            floor_area_sqm = st.slider(
+                "Floor Area (sqm)",
+                min_value=float(feature_options.get('floor_area_sqm_min', 28)),
+                max_value=float(feature_options.get('floor_area_sqm_max', 186)),
+                value=float(feature_options.get('floor_area_sqm_mean', 90)),
                 step=1.0
             )
             
-            # Transaction date
-            st.subheader("Transaction Details")
+            lease_commence_date = st.slider(
+                "Lease Commence Date",
+                min_value=1960,
+                max_value=2020,
+                value=1995,
+                step=1,
+                help="Year when the flat's 99-year lease started"
+            )
             
+            max_floor_lvl = st.slider(
+                "Max Floor Level",
+                min_value=int(feature_options.get('max_floor_lvl_min', 3)),
+                max_value=int(feature_options.get('max_floor_lvl_max', 50)),
+                value=int(feature_options.get('max_floor_lvl_mean', 12)),
+                step=1
+            )
+            
+            # Boolean facilities (categorical in your model)
+            market_hawker = st.selectbox("Market/Hawker in Block", options=['N', 'Y'], index=0)
+            multistorey_carpark = st.selectbox("Multistorey Carpark", options=['N', 'Y'], index=1)
+            precinct_pavilion = st.selectbox("Precinct Pavilion", options=['N', 'Y'], index=0)
+        
+        with col3:
+            st.markdown("**Location & Transport**")
+            
+            Mall_Nearest_Distance = st.slider(
+                "Distance to Nearest Mall (m)",
+                min_value=float(feature_options.get('Mall_Nearest_Distance_min', 0)),
+                max_value=float(feature_options.get('Mall_Nearest_Distance_max', 5000)),
+                value=float(feature_options.get('Mall_Nearest_Distance_mean', 800)),
+                step=50.0
+            )
+            
+            Hawker_Nearest_Distance = st.slider(
+                "Distance to Nearest Hawker (m)",
+                min_value=float(feature_options.get('Hawker_Nearest_Distance_min', 0)),
+                max_value=float(feature_options.get('Hawker_Nearest_Distance_max', 3000)),
+                value=float(feature_options.get('Hawker_Nearest_Distance_mean', 300)),
+                step=25.0
+            )
+            
+            mrt_nearest_distance = st.slider(
+                "Distance to Nearest MRT (m)",
+                min_value=float(feature_options.get('mrt_nearest_distance_min', 0)),
+                max_value=float(feature_options.get('mrt_nearest_distance_max', 5000)),
+                value=float(feature_options.get('mrt_nearest_distance_mean', 600)),
+                step=50.0
+            )
+            
+            mrt_name = st.selectbox(
+                "Nearest MRT Station",
+                options=feature_options.get('mrt_name', ['Ang Mo Kio']),
+                index=0
+            )
+        
+        # Additional features
+        st.markdown("### Additional Location Features")
+        col4, col5, col6 = st.columns(3)
+        
+        with col4:
+            bus_stop_nearest_distance = st.slider(
+                "Distance to Nearest Bus Stop (m)",
+                min_value=float(feature_options.get('bus_stop_nearest_distance_min', 0)),
+                max_value=float(feature_options.get('bus_stop_nearest_distance_max', 1000)),
+                value=float(feature_options.get('bus_stop_nearest_distance_mean', 150)),
+                step=25.0
+            )
+            
+            bus_interchange = st.selectbox("MRT is Bus Interchange", options=[0, 1], index=0)
+            mrt_interchange = st.selectbox("MRT is Train Interchange", options=[0, 1], index=0)
+        
+        with col5:
+            pri_sch_nearest_distance = st.slider(
+                "Distance to Nearest Primary School (m)",
+                min_value=float(feature_options.get('pri_sch_nearest_distance_min', 0)),
+                max_value=float(feature_options.get('pri_sch_nearest_distance_max', 3000)),
+                value=float(feature_options.get('pri_sch_nearest_distance_mean', 400)),
+                step=25.0
+            )
+            
+            pri_sch_affiliation = st.selectbox("Primary School Affiliation", options=[0, 1], index=0)
+        
+        with col6:
+            sec_sch_nearest_dist = st.slider(
+                "Distance to Nearest Secondary School (m)",
+                min_value=float(feature_options.get('sec_sch_nearest_dist_min', 0)),
+                max_value=float(feature_options.get('sec_sch_nearest_dist_max', 5000)),
+                value=float(feature_options.get('sec_sch_nearest_dist_mean', 500)),
+                step=25.0
+            )
+            
+            cutoff_point = st.slider(
+                "Secondary School PSLE Cutoff",
+                min_value=int(feature_options.get('cutoff_point_min', 150)),
+                max_value=int(feature_options.get('cutoff_point_max', 280)),
+                value=int(feature_options.get('cutoff_point_mean', 200)),
+                step=1
+            )
+            
+            affiliation = st.selectbox("Secondary School Affiliation", options=[0, 1], index=0)
+        
+        # Transaction details
+        st.markdown("### Transaction Details")
+        col7, col8 = st.columns(2)
+        
+        with col7:
             transaction_date = st.date_input(
                 "Transaction Date",
                 value=datetime.now().date()
             )
-            
-            # Model selection
+        
+        with col8:
             model_type = st.selectbox(
                 "Prediction Model",
                 options=["ridge", "linear", "lasso"],
@@ -316,23 +387,44 @@ def show_prediction():
             )
         
         # Submit button
-        submit = st.form_submit_button("Predict Price")
+        submit = st.form_submit_button("Predict Price", use_container_width=True)
     
     # Make prediction when form is submitted
     if submit:
-        # Prepare input data - using floor_area_sqft instead of floor_area_sqm
+        # Calculate hdb_age from lease_commence_date
+        current_year = datetime.now().year
+        hdb_age = current_year - lease_commence_date
+        
+        # Collect ONLY the base input data (no derived features)
         input_data = {
             'town': town,
-            'flat_type': flat_type, 
+            'flat_type': flat_type,
             'flat_model': flat_model,
             'storey_range': storey_range,
-            'floor_area_sqft': floor_area_sqft,  # Changed from floor_area_sqm
-            'remaining_lease': remaining_lease,
-            'transaction_month': transaction_date.month,
-            'transaction_year': transaction_date.year
+            'floor_area_sqm': floor_area_sqm,
+            'lease_commence_date': lease_commence_date,
+            'hdb_age': hdb_age,  # Base calculation
+            'max_floor_lvl': max_floor_lvl,
+            'market_hawker': market_hawker,
+            'multistorey_carpark': multistorey_carpark,
+            'precinct_pavilion': precinct_pavilion,
+            'Mall_Nearest_Distance': Mall_Nearest_Distance,
+            'Hawker_Nearest_Distance': Hawker_Nearest_Distance,
+            'mrt_nearest_distance': mrt_nearest_distance,
+            'mrt_name': mrt_name,
+            'bus_interchange': bus_interchange,
+            'mrt_interchange': mrt_interchange,
+            'bus_stop_nearest_distance': bus_stop_nearest_distance,
+            'pri_sch_nearest_distance': pri_sch_nearest_distance,
+            'pri_sch_affiliation': pri_sch_affiliation,
+            'sec_sch_nearest_dist': sec_sch_nearest_dist,
+            'cutoff_point': cutoff_point,
+            'affiliation': affiliation,
+            'year': transaction_date.year,
+            'month': transaction_date.month
         }
         
-        # Get the prediction
+        # Get the prediction (derived features will be calculated in prepare_features_for_prediction)
         predicted_price, info = make_prediction(input_data, models_dict, model_type)
         
         # Display prediction
@@ -350,19 +442,5 @@ def show_prediction():
             st.markdown(f"* **Model Accuracy (R²):** {info['model_r2']:.4f}")
             st.markdown(f"* **Error Margin (RMSE):** ${info['model_rmse']:,.2f}")
             
-            # Show input summary
-            st.markdown("### Property Summary")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**Town:** {town}")
-                st.markdown(f"**Flat Type:** {flat_type}")
-                st.markdown(f"**Flat Model:** {flat_model}")
-                st.markdown(f"**Storey Range:** {storey_range}")
-            
-            with col2:
-                st.markdown(f"**Floor Area:** {floor_area_sqft} sqft")  # Changed from sqm to sqft
-                st.markdown(f"**Remaining Lease:** {remaining_lease} years")
-                st.markdown(f"**Transaction Date:** {transaction_date.strftime('%B %Y')}")
         else:
             st.error(f"Could not make prediction: {info.get('error', 'Unknown error')}")
