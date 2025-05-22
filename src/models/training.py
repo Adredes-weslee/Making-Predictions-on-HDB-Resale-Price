@@ -36,9 +36,12 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.base import clone
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 from src.data.preprocessing_pipeline import create_standard_preprocessing_pipeline
+from src.data.feature_engineering import get_numeric_features, get_categorical_features
+
 
 # Define model options
 MODEL_TYPES = {
@@ -48,96 +51,79 @@ MODEL_TYPES = {
 }
 
 def load_training_data(data_path):
-    """Load and prepare training data for model building.
+    """Load and prepare training data with consistent preprocessing.
     
     Args:
-        data_path (str): Path to the CSV file containing training data.
+        data_path: Path to the training data CSV file
         
     Returns:
-        tuple: (X, y) where X is feature data and y is target variable.
-        
-    Raises:
-        FileNotFoundError: If the data file doesn't exist.
-        ValueError: If 'resale_price' column isn't found in the data.
+        X: Features DataFrame
+        y: Target Series
     """
     try:
-        # Load data
+        from src.data.preprocessing_pipeline import prepare_data_for_modeling
+        
+        # Load the data
         df = pd.read_csv(data_path, encoding='utf-8')
-
-        # DEBUG: Use only 1% of the data
-        df = df.sample(frac=0.01, random_state=42)
+        print(f"Loaded data columns: {df.columns[:10]}...")
         
-        # Check if target variable exists
-        if 'resale_price' not in df.columns:
-            raise ValueError("Target variable 'resale_price' not found in dataset")
+        # Use the prepare_data_for_modeling function
+        X, y, numerical_features, categorical_features = prepare_data_for_modeling(
+            df, is_training=True, drop_high_missing=True)
         
-        # Debug: Print actual column names
-        print(f"Loaded data columns: {df.columns[:10].tolist()}...")
+        print(f"Preprocessed data: {X.shape[0]} samples with {X.shape[1]} features")
+        print(f"  - {len(numerical_features)} numerical features")
+        print(f"  - {len(categorical_features)} categorical features")
         
-        # Find columns with mixed types and convert them to strings
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                # Convert mixed-type columns to strings
-                df[col] = df[col].astype(str)
-        
-        # Extract target
-        y = df['resale_price']
-        
-        # Extract features (all columns except target)
-        X = df.drop('resale_price', axis=1)
+        # Store the feature lists as attributes on X for easier access
+        X._numerical_features = numerical_features
+        X._categorical_features = categorical_features
         
         return X, y
-        
     except Exception as e:
         print(f"Error loading training data: {str(e)}")
         raise
 
-def create_preprocessing_pipeline(X, categorical_features=None, numerical_features=None):
-    """Train a full pipeline model and save it for consistent prediction.
+
+def create_preprocessing_pipeline(X, categorical_features=None, numerical_features=None, feature_percentile=50):
+    """Create a preprocessing pipeline for the given data.
     
-    This function:
-    1. Loads and prepares training data
-    2. Creates preprocessing transformers for features
-    3. Builds a full sklearn Pipeline with preprocessing and model steps
-    4. Trains the pipeline on the data
-    5. Evaluates model performance
-    6. Saves the full pipeline and feature information
+    This function builds a scikit-learn preprocessing pipeline that handles both categorical
+    and numerical features, with appropriate transformations for each.
     
     Args:
-        model_type (str): Type of model to train ('linear', 'ridge', or 'lasso').
-        data_path (str): Path to the CSV file containing training data.
-        model_name (str, optional): Name for the saved model files.
-        model_dir (str, optional): Directory to save model files.
-        test_size (float, optional): Proportion of data to use for test set.
-        random_state (int, optional): Random seed for reproducibility.
+        X (pd.DataFrame): Input features dataframe
+        categorical_features (list, optional): List of categorical feature names
+        numerical_features (list, optional): List of numerical feature names  
+        feature_percentile (int, optional): Percentile for feature selection
         
     Returns:
-        dict: Information about the trained model including performance metrics
-              and paths to saved files.
-              
-    Raises:
-        ValueError: If an invalid model_type is specified.
-        FileNotFoundError: If data_path doesn't exist.
+        tuple: (preprocessor, categorical_features, numerical_features)
     """
-    # If features aren't explicitly provided, auto-detect them
-    if categorical_features is None:
-        categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-    
-    if numerical_features is None:
-        numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    # Use features identified during data loading if not explicitly provided
+    if categorical_features is None and hasattr(X, '_categorical_features'):
+        categorical_features = X._categorical_features
+    elif categorical_features is None:
+        categorical_features = get_categorical_features(X)
+        
+    if numerical_features is None and hasattr(X, '_numerical_features'):
+        numerical_features = X._numerical_features
+    elif numerical_features is None:
+        numerical_features = get_numeric_features(X)
     
     # Use the preprocessing pipeline from src.data.preprocessing_pipeline
     preprocessor = create_standard_preprocessing_pipeline(
         categorical_features=categorical_features,
         numerical_features=numerical_features,
-        feature_percentile=99  # You can adjust this as needed
+        feature_percentile=feature_percentile
     )
     
     return preprocessor, categorical_features, numerical_features
 
 
 def train_and_save_pipeline_model(model_type='linear', data_path=None, model_name=None, 
-                                 model_dir=None, test_size=0.2, random_state=42):
+                                 model_dir=None, test_size=0.2, random_state=42, 
+                                 feature_percentile=50):
     """Train a full pipeline model and save it for consistent prediction.
     
     This function:
@@ -192,7 +178,68 @@ def train_and_save_pipeline_model(model_type='linear', data_path=None, model_nam
     )
     
     # Create preprocessing pipeline
-    preprocessor, categorical_features, numerical_features = create_preprocessing_pipeline(X)
+    preprocessor, categorical_features, numerical_features = create_preprocessing_pipeline(
+        X, 
+        feature_percentile=feature_percentile  # Pass the parameter here
+    )
+        
+    # Add precise feature count debugging
+    print("\n=== EXACT FEATURE COUNT DEBUG ===")
+    print(f"Original data shape: {X.shape[1]} columns")
+    print(f"  - Categorical features: {len(categorical_features)}")
+    print(f"  - Numerical features: {len(numerical_features)}")
+    
+    # FIXED VERSION: Pass both X and y to the fit method
+    print("Fitting preprocessor on small sample to analyze feature counts...")
+    
+    try:
+        # First, examine just the encoding step before feature selection
+        from sklearn.compose import ColumnTransformer
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+        
+        # Create a simple transformer without feature selection
+        simple_transformer = ColumnTransformer(
+            transformers=[
+                ("num", StandardScaler(), numerical_features),
+                ("cat", OneHotEncoder(handle_unknown='ignore'), categorical_features),
+            ],
+            remainder='drop',
+            verbose_feature_names_out=False
+        )
+        
+        # Fit and transform a small sample
+        simple_transformer.fit(X_train.iloc[:])
+        X_encoded = simple_transformer.transform(X_train.iloc[:1])
+        
+        print(f"After encoding (before selection): {X_encoded.shape[1]} features")
+        
+        # Now fit the full preprocessor with feature selection
+        # Important: pass both X and y to the fit method
+        preprocessor_clone = clone(preprocessor)
+        preprocessor_clone.fit(X_train.iloc[:100], y_train.iloc[:100])
+        X_transformed = preprocessor_clone.transform(X_train.iloc[:1])
+        
+        print(f"After feature selection: {X_transformed.shape[1]} features")
+        print(f"Feature selection kept {X_transformed.shape[1]/X_encoded.shape[1]:.1%} of features")
+        
+        # Try to get feature names if available
+        feature_names = preprocessor_clone.get_feature_names_out()
+        print(f"  - Feature names count: {len(feature_names)}")
+        
+        # Count features by type
+        cat_features = [f for f in feature_names if f.startswith('cat__')]
+        num_features = [f for f in feature_names if f.startswith('num__')]
+        print(f"  - Categorical features after selection: {len(cat_features)}")
+        print(f"  - Numerical features after selection: {len(num_features)}")
+        
+        print(f"Feature selection kept: {feature_percentile}% (expected to keep {int(X_encoded.shape[1] * feature_percentile/100)} features)")
+    except Exception as e:
+        print(f"  - Debug error: {str(e)}")
+        print(f"  - Debug error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+    
+    print("================================\n")
     
     # Create full pipeline with preprocessing and model
     full_pipeline = Pipeline([
