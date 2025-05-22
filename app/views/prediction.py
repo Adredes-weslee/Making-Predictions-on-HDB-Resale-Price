@@ -22,8 +22,6 @@ if src_path not in sys.path:
 
 from src.data.preprocessing_pipeline import create_date_features, create_age_features
 
-
-
 @st.cache_data
 def load_towns_and_features():
     """Load unique values for towns and other feature options."""
@@ -43,16 +41,17 @@ def load_towns_and_features():
         feature_options = {}
         
         # Categorical features from your reduced dataset
-        categorical_cols = ['town', 'flat_type', 'flat_model', 'storey_range', 'full_flat_type', 'mrt_name']
+        categorical_cols = ['town', 'flat_type', 'flat_model', 'storey_range', 'mrt_name']
         
         for col in categorical_cols:
             if col in df.columns:
                 feature_options[col] = sorted(df[col].unique().tolist())
         
         # Numerical feature ranges
-        numerical_cols = ['floor_area_sqm', 'remaining_lease', 'max_floor_lvl', 'Mall_Nearest_Distance', 
-                         'Hawker_Nearest_Distance', 'mrt_nearest_distance', 'bus_stop_nearest_distance',
-                         'pri_sch_nearest_distance', 'sec_sch_nearest_dist', 'cutoff_point']
+        numerical_cols = ['floor_area_sqm', 'lease_commence_date', 'hdb_age', 'max_floor_lvl', 
+                         'Mall_Nearest_Distance', 'Hawker_Nearest_Distance', 'mrt_nearest_distance', 
+                         'bus_stop_nearest_distance', 'pri_sch_nearest_distance', 'sec_sch_nearest_dist', 
+                         'cutoff_point']
         
         for col in numerical_cols:
             if col in df.columns:
@@ -64,7 +63,8 @@ def load_towns_and_features():
                     # Set safe defaults
                     defaults = {
                         'floor_area_sqm': (28, 186, 90),
-                        'remaining_lease': (40, 99, 70),
+                        'lease_commence_date': (1960, 2020, 1995),
+                        'hdb_age': (5, 65, 29),
                         'max_floor_lvl': (3, 50, 12),
                         'Mall_Nearest_Distance': (0, 5000, 800),
                         'Hawker_Nearest_Distance': (0, 3000, 300),
@@ -102,7 +102,7 @@ def prepare_features_for_prediction(input_data):
     input_df = create_date_features(input_df)    # This creates year, month from Tranc_YearMonth
     input_df = create_age_features(input_df)     # This creates building_age, remaining_lease, lease_decay
     
-    # Ensure proper data types
+    # Ensure proper data types based on JSON schema
     categorical_features = ["town", "flat_type", "storey_range", "flat_model", "market_hawker", 
                            "multistorey_carpark", "precinct_pavilion", "mrt_name", "bus_interchange", 
                            "mrt_interchange", "pri_sch_affiliation", "affiliation"]
@@ -150,7 +150,7 @@ def make_prediction(input_data, models_dict, model_type='ridge'):
             input_df = prepare_features_for_prediction(input_data)
             
             # Debug section
-            with st.expander("Debug Info", expanded=True):  # Make it expanded to see the issue
+            with st.expander("Debug Info", expanded=False):  
                 st.markdown("### Input Data After Preparation")
                 st.dataframe(input_df)
                 
@@ -269,9 +269,9 @@ def show_prediction():
             
             lease_commence_date = st.slider(
                 "Lease Commence Date",
-                min_value=1960,
-                max_value=2020,
-                value=1995,
+                min_value=int(feature_options.get('lease_commence_date_min', 1960)),
+                max_value=int(feature_options.get('lease_commence_date_max', 2020)),
+                value=int(feature_options.get('lease_commence_date_mean', 1995)),
                 step=1,
                 help="Year when the flat's 99-year lease started"
             )
