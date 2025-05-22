@@ -23,12 +23,13 @@ def load_towns_and_features():
     try:
         # Get data directory
         root_dir = Path(__file__).parent.parent.parent
-        data_path = os.path.join(root_dir, 'data', 'processed', 'train_processed_exploratory.csv')
+        data_path = os.path.join(root_dir, 'data', 'processed', 'train_pipeline_processed.csv')
         
         if not os.path.exists(data_path):
-            return {}
+            # Fall back to exploratory file if pipeline file doesn't exist
+            data_path = os.path.join(root_dir, 'data', 'processed', 'train_processed_exploratory.csv')
             
-        # Load a sample of the data
+        # Load a sample of the data with low_memory=False
         df = pd.read_csv(data_path, nrows=10000, low_memory=False)
         
         # Extract unique values for categorical features
@@ -46,12 +47,22 @@ def load_towns_and_features():
         if 'flat_model' in df.columns:
             feature_options['flat_models'] = sorted(df['flat_model'].unique().tolist())
             
-        # Get numerical feature ranges
-        num_features = ['floor_area_sqm', 'remaining_lease']
+        # Get numerical feature ranges - with additional error handling
+        num_features = ['floor_area_sqft', 'remaining_lease']
         for feat in num_features:
             if feat in df.columns:
-                feature_options[f'{feat}_min'] = float(df[feat].min())
-                feature_options[f'{feat}_max'] = float(df[feat].max())
+                try:
+                    # Explicitly convert to float to ensure single values
+                    feature_options[f'{feat}_min'] = float(df[feat].min())
+                    feature_options[f'{feat}_max'] = float(df[feat].max())
+                except Exception as e:
+                    # Use safe defaults if conversion fails
+                    if feat == 'floor_area_sqft':
+                        feature_options[f'{feat}_min'] = 300.0
+                        feature_options[f'{feat}_max'] = 2000.0
+                    elif feat == 'remaining_lease':
+                        feature_options[f'{feat}_min'] = 40.0
+                        feature_options[f'{feat}_max'] = 99.0
                 
         return feature_options
         
@@ -83,13 +94,13 @@ def prepare_features_for_prediction(input_data, model_features):
     if not required_columns:
         # Your existing default columns list is fine here
         required_columns = [
-            'town', 'flat_type', 'flat_model', 'storey_range', 'floor_area_sqm', 'remaining_lease',
+            'town', 'flat_type', 'flat_model', 'storey_range', 'floor_area_sqft', 'floor_area_sqm', 'remaining_lease',
             'transaction_month', 'transaction_year', 'Hawker_Nearest_Distance', 'bus_stop_longitude',
             'sec_sch_nearest_dist', 'block', 'hawker_market_stalls', 'lease_commence_date', '1room_sold',
             'lower', 'Tranc_YearMonth', 'Latitude', 'Hawker_Within_1km', 'exec_sold', 'upper', 'postal',
             'hdb_age', 'commercial', '5room_sold', 'affiliation', 'cutoff_point', 'bus_interchange',
             'mid', 'pri_sch_nearest_distance', 'Mall_Within_500m', 'bus_stop_latitude', 'multistorey_carpark',
-            'mrt_longitude', 'residential', 'Longitude', 'floor_area_sqft', 'Tranc_Month', 'Tranc_Year',
+            'mrt_longitude', 'residential', 'Longitude', 'Tranc_Month', 'Tranc_Year',
             'address', 'sec_sch_longitude', 'vacancy', 'market_hawker', '3room_sold', '3room_rental',
             'Hawker_Within_2km', 'mrt_interchange', 'bus_stop_name', '2room_sold',
             'bus_stop_nearest_distance', 'mrt_nearest_distance', 'hawker_food_stalls',
@@ -237,20 +248,43 @@ def show_prediction():
             )
             
         with col2:
-            # Physical attributes
+            # Physical attributes section in col2:
             st.subheader("Physical Attributes")
-            
-            floor_area_min = feature_options.get('floor_area_sqm_min', 30)
-            floor_area_max = feature_options.get('floor_area_sqm_max', 200)
-            
-            floor_area_sqm = st.slider(
-                "Floor Area (sqm)",
-                min_value=floor_area_min,
-                max_value=floor_area_max,
-                value=90.0,
-                step=1.0
-            )
-            
+
+            # Fix for the type mismatch error
+            try:
+                # Get floor area min/max, ensuring they are single float values
+                floor_area_min = float(feature_options.get('floor_area_sqft_min', 300))
+                floor_area_max = float(feature_options.get('floor_area_sqft_max', 2000))
+                
+                # Ensure min doesn't exceed max
+                if floor_area_min > floor_area_max:
+                    floor_area_min, floor_area_max = 300, 2000
+                
+                # Default value must be a single number, not a list
+                default_area = 970  # Default value (~90 sqm converted to sqft)
+                
+                # Ensure default is within range
+                default_area = max(floor_area_min, min(default_area, floor_area_max))
+                
+                floor_area_sqft = st.slider(
+                    "Floor Area (sqft)",
+                    min_value=floor_area_min,
+                    max_value=floor_area_max,
+                    value=default_area,
+                    step=10.0
+                )
+            except Exception as e:
+                # Fallback to safe defaults if any error occurs
+                st.warning(f"Using default area range due to: {str(e)}")
+                floor_area_sqft = st.slider(
+                    "Floor Area (sqft)",
+                    min_value=300.0,
+                    max_value=2000.0,
+                    value=970.0,
+                    step=10.0
+                )
+                        
             # Lease details
             st.subheader("Lease Information")
             
@@ -261,8 +295,8 @@ def show_prediction():
                 "Remaining Lease (years)",
                 min_value=lease_min,
                 max_value=lease_max,
-                value=70,
-                step=1
+                value=70.0,
+                step=1.0
             )
             
             # Transaction date
@@ -286,14 +320,13 @@ def show_prediction():
     
     # Make prediction when form is submitted
     if submit:
-        # Prepare input data - this would need to match the format expected by your model
-        # This is a simplified example - your actual preprocessing might be more complex
+        # Prepare input data - using floor_area_sqft instead of floor_area_sqm
         input_data = {
             'town': town,
             'flat_type': flat_type, 
             'flat_model': flat_model,
             'storey_range': storey_range,
-            'floor_area_sqm': floor_area_sqm,
+            'floor_area_sqft': floor_area_sqft,  # Changed from floor_area_sqm
             'remaining_lease': remaining_lease,
             'transaction_month': transaction_date.month,
             'transaction_year': transaction_date.year
@@ -328,7 +361,7 @@ def show_prediction():
                 st.markdown(f"**Storey Range:** {storey_range}")
             
             with col2:
-                st.markdown(f"**Floor Area:** {floor_area_sqm} sqm")
+                st.markdown(f"**Floor Area:** {floor_area_sqft} sqft")  # Changed from sqm to sqft
                 st.markdown(f"**Remaining Lease:** {remaining_lease} years")
                 st.markdown(f"**Transaction Date:** {transaction_date.strftime('%B %Y')}")
         else:
