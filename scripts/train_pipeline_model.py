@@ -16,6 +16,7 @@ Options:
 """
 import os
 import argparse
+import yaml
 from pathlib import Path
 
 
@@ -46,20 +47,34 @@ def main():
     
     print(f"Training {args.model_type} model with pipeline...")
     
+    # Load model configuration
+    config_path = os.path.join(root_dir, "configs", "model_config.yaml")
+    
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            model_config = yaml.safe_load(f)
+        
+        # Extract feature selection percentile from config
+        feature_percentile = model_config.get('features', {}).get('feature_selection', {}).get('percentile', 50)
+        print(f"Using feature selection percentile from config: {feature_percentile}")
+    else:
+        feature_percentile = 50  # Default if config file not found
+        print(f"Config file not found. Using default percentile: {feature_percentile}")    
+    
     # Train and save the model
     model_info = train_and_save_pipeline_model(
         model_type=args.model_type,
         data_path=args.data_path,
-        model_name=output_name
+        model_name=output_name,
+        feature_percentile=feature_percentile  # Pass feature percentile to training function
     )
     
-    print("\nModel training completed!")
+    print(f"Model training complete. Model saved as {model_info['pipeline_path']}")
     print(f"Model type: {args.model_type}")
     print(f"Training R²: {model_info['metrics']['train_r2']:.4f}")
     print(f"Test R²: {model_info['metrics']['test_r2']:.4f}")
     print(f"Training RMSE: ${model_info['metrics']['train_rmse']:.2f}")
     print(f"Test RMSE: ${model_info['metrics']['test_rmse']:.2f}")
-    print(f"Model saved to: {model_info['pipeline_path']}")
     print(f"Feature info saved to: {model_info['feature_info_path']}")
     print(f"Total features used: {model_info['feature_count']}")
     print(f"Training samples: {model_info['training_samples']}")
