@@ -16,6 +16,8 @@ def create_sidebar():
         st.title("HDB Resale Price Predictor")
         
         # Main navigation
+        if "page" not in st.session_state:
+            st.session_state.page = "Home"  # Default value
         selected_page = st.radio(
             "Navigation",
             ["Home", "Data Explorer", "Make Prediction", "Model Performance"],
@@ -23,7 +25,8 @@ def create_sidebar():
             format_func=lambda x: f"📊 {x}" if x == "Data Explorer" else
                               f"🔮 {x}" if x == "Make Prediction" else
                               f"📈 {x}" if x == "Model Performance" else
-                              f"🏠 {x}"
+                              f"🏠 {x}",
+            key="page"
         )
         
         st.sidebar.markdown("---")
@@ -69,7 +72,7 @@ def create_sidebar():
         
         # Footer
         st.sidebar.markdown("---")
-        st.sidebar.markdown("Developed by [Your Name]")
+        st.sidebar.markdown("Developed by Wes Lee")
         st.sidebar.markdown("Data source: data.gov.sg")
         
     return selected_page
