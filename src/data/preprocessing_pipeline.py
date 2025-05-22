@@ -17,15 +17,15 @@ from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.feature_selection import SelectPercentile, mutual_info_regression
 
-def clean_date_features(df):
+def clean_date_columns(df):
     """
-    Clean and convert date-related columns, and create new date features.
+    Convert date columns to proper datetime types.
     
     Args:
         df: DataFrame with date columns
         
     Returns:
-        DataFrame with cleaned date columns and new date features
+        DataFrame with properly typed date columns
     """
     df_copy = df.copy()
     
@@ -33,21 +33,94 @@ def clean_date_features(df):
     if 'Tranc_YearMonth' in df_copy.columns and not pd.api.types.is_datetime64_any_dtype(df_copy['Tranc_YearMonth']):
         df_copy['Tranc_YearMonth'] = pd.to_datetime(df_copy['Tranc_YearMonth'])
     
-    # Create new date columns
+    return df_copy
+
+def create_date_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create temporal features from the transaction date column.
+    
+    This function extracts useful time-based features from the transaction date:
+    - Year: Captures long-term price trends and market cycles
+    - Month: Captures seasonal patterns in the real estate market
+    - Quarter: Captures quarterly market trends and reporting periods
+    
+    These features allow the model to learn temporal patterns in HDB resale prices.
+    The function checks for the existence of the 'Tranc_YearMonth' column before
+    attempting to extract features.
+    
+    Args:
+        df (pd.DataFrame): DataFrame with 'Tranc_YearMonth' column of datetime type.
+            If this column doesn't exist, the function returns the DataFrame unchanged.
+        
+    Returns:
+        pd.DataFrame: A copy of the input DataFrame with additional columns:
+            - 'year': The year of the transaction
+            - 'month': The month of the transaction (1-12)
+            - 'quarter': The quarter of the transaction (1-4)
+    """
+    df_copy = df.copy()
+    
     if 'Tranc_YearMonth' in df_copy.columns:
-        date_features = ["year", "month", "quarter"]
-        df_copy[date_features] = df_copy.apply(lambda row: pd.Series({
-            "year": row.Tranc_YearMonth.year, 
-            "month": row.Tranc_YearMonth.month, 
-            "quarter": row.Tranc_YearMonth.quarter
-        }), axis=1)
+        df_copy['year'] = df_copy['Tranc_YearMonth'].dt.year
+        df_copy['month'] = df_copy['Tranc_YearMonth'].dt.month
+        df_copy['quarter'] = df_copy['Tranc_YearMonth'].dt.quarter
     
-    # Create age at transaction feature
+    return df_copy
+
+def create_age_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create property age and remaining lease features.
+    
+    This function calculates important HDB flat age-related features:
+    - building_age: Years since the flat was built (transaction year - lease commence year)
+    - remaining_lease: Estimated years of lease remaining at transaction time
+    - lease_decay: Non-linear transformation of remaining lease that better captures
+      the accelerating impact of lease decay on property value
+    
+    HDB flats in Singapore typically have 99-year leases, and the remaining lease
+    duration is known to significantly impact resale prices.
+    
+    Args:
+        df (pd.DataFrame): DataFrame with 'year' column (transaction year) and
+            'lease_commence_date' column (year when the flat's lease started).
+        
+    Returns:
+        pd.DataFrame: A copy of the input DataFrame with additional columns:
+            - 'building_age': Age of the building at transaction time
+            - 'remaining_lease': Estimated remaining lease years
+            - 'lease_decay': Non-linear transformation of remaining lease
+    """
+    df_copy = df.copy()
+    
     if 'year' in df_copy.columns and 'lease_commence_date' in df_copy.columns:
-        df_copy['age_at_tranc'] = df_copy['year'] - df_copy['lease_commence_date']
+        # Calculate building age
+        df_copy['building_age'] = df_copy['year'] - df_copy['lease_commence_date']
+        
+        # Calculate remaining lease
+        df_copy['remaining_lease'] = 99 - df_copy['building_age']
+        
+        # Handle negative remaining lease (shouldn't happen, but just in case)
+        df_copy['remaining_lease'] = df_copy['remaining_lease'].clip(lower=0)
+        
+        # Create lease decay feature (non-linear transformation)
+        # The impact of lease decay accelerates as the lease gets shorter
+        df_copy['lease_decay'] = 1 / (df_copy['remaining_lease'] + 1)
     
-    # Convert datatypes to object
-    for col in ['bus_interchange', 'mrt_interchange', 'pri_sch_affiliation', 'affiliation']:
+    return df_copy
+
+def convert_column_types(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert columns to appropriate data types for modeling.
+    
+    Args:
+        df: DataFrame to process
+        
+    Returns:
+        DataFrame with converted column types
+    """
+    df_copy = df.copy()
+    
+    # Convert these binary columns to object type for proper categorical handling
+    binary_cols = ['bus_interchange', 'mrt_interchange', 'pri_sch_affiliation', 'affiliation']
+    for col in binary_cols:
         if col in df_copy.columns:
             df_copy[col] = df_copy[col].astype('object')
     
@@ -63,13 +136,46 @@ def get_columns_to_drop():
     Returns:
         List of column names to drop
     """
+    # Try to load the columns_to_drop from feature selection config
+    try:
+        import json
+        import os
+        from pathlib import Path
+        
+        root_dir = Path(__file__).parent.parent.parent
+        config_path = os.path.join(root_dir, "configs", "feature_selection_config.json")
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                feature_config = json.load(f)
+                return feature_config.get("columns_to_drop", [])
+    except Exception as e:
+        print(f"Warning: Could not load feature selection config. Using default columns to drop. Error: {e}")
+    
+    # Default list if config isn't available
     return [
-        'town', 'flat_type', 'storey_range', 'floor_area_sqm', 'flat_model', 
-        'lease_commence_date', 'Tranc_Year', 'Tranc_Month', 'lower', 'upper', 'mid', 
-        'hdb_age', 'address', 'year_completed', 'residential', 'postal',
-        'Latitude', 'Longitude', 'mrt_latitude', 'mrt_longitude', 'bus_stop_name', 
-        'bus_stop_latitude', 'bus_stop_longitude', 'pri_sch_latitude', 'pri_sch_longitude', 
-        'sec_sch_latitude', 'sec_sch_longitude', 'Tranc_YearMonth', 'block'
+        'id',
+        'address',
+        'postal',
+        'block',
+        'street_name',
+        'bus_stop_name',
+        # 'pri_sch_name',
+        'sec_sch_name',
+        # 'mrt_name',
+        'Latitude',
+        'Longitude',
+        'bus_stop_latitude', 
+        'bus_stop_longitude',
+        'pri_sch_latitude', 
+        'pri_sch_longitude',
+        'sec_sch_latitude', 
+        'sec_sch_longitude',
+        'mrt_latitude', 
+        'mrt_longitude',
+        'floor_area_sqm',
+        'Tranc_YearMonth',
+        # Add any additional columns you'd like to drop by default
     ]
 
 def get_missing_value_columns():
@@ -156,8 +262,11 @@ def prepare_data_for_modeling(df, is_training=True, drop_high_missing=True):
     # Create a copy of the DataFrame
     df_copy = df.copy()
     
-    # Clean date features
-    df_copy = clean_date_features(df_copy)
+    # Clean and process date-related features
+    df_copy = clean_date_columns(df_copy)
+    df_copy = create_date_features(df_copy)
+    df_copy = create_age_features(df_copy)
+    df_copy = convert_column_types(df_copy)
     
     # Get columns to drop
     columns_to_drop = get_columns_to_drop()
@@ -189,3 +298,40 @@ def prepare_data_for_modeling(df, is_training=True, drop_high_missing=True):
     
     # Return prepared data
     return df_copy, y, numerical_features, categorical_features
+
+def save_processed_data(X, y=None, output_path=None, save_y=True):
+    """
+    Save preprocessed data as CSV file for consistency.
+    
+    Args:
+        X: Features DataFrame
+        y: Target Series (optional)
+        output_path: Path to save the CSV file
+        save_y: Whether to include target variable in the saved file
+    
+    Returns:
+        Path to the saved file
+    """
+    import os
+    from pathlib import Path
+    
+    # Set default path if none provided
+    if output_path is None:
+        root_dir = Path(__file__).parent.parent.parent
+        output_path = os.path.join(root_dir, "data", "processed", "train_pipeline_processed.csv")
+    
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Combine X and y if y is provided and save_y is True
+    if y is not None and save_y:
+        data = X.copy()
+        data['resale_price'] = y
+    else:
+        data = X
+    
+    # Save to CSV
+    data.to_csv(output_path, index=False)
+    print(f"Processed data saved to {output_path}")
+    
+    return output_path
