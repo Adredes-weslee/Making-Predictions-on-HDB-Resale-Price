@@ -1,9 +1,9 @@
 {
-  "train_r2": 0.9273606015755637,
-  "test_r2": 0.9268094477147067,
-  "train_rmse": 38657.77591155392,
-  "test_rmse": 38631.565684072324,
-  "timestamp": "2025-05-23 01:40:44",
+  "train_r2": 0.8977923639523688,
+  "test_r2": 0.8987203612377435,
+  "train_rmse": 45855.60383095766,
+  "test_rmse": 45443.928675575415,
+  "timestamp": "2025-05-23 04:25:07",
   "model_type": "lasso",
-  "feature_percentile": 95
+  "feature_percentile": 99
 }

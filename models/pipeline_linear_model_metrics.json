@@ -1,9 +1,9 @@
 {
-  "train_r2": 0.9275720775611391,
-  "test_r2": 0.9269361581053207,
-  "train_rmse": 38601.46246286296,
-  "test_rmse": 38598.11094794559,
-  "timestamp": "2025-05-23 01:39:18",
+  "train_r2": 0.8978623622385439,
+  "test_r2": 0.8987458040716109,
+  "train_rmse": 45839.89872533534,
+  "test_rmse": 45438.22024806938,
+  "timestamp": "2025-05-23 04:00:51",
   "model_type": "linear",
-  "feature_percentile": 95
+  "feature_percentile": 99
 }
