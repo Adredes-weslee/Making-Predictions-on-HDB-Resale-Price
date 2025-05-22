@@ -24,36 +24,26 @@ def show_home():
     data, you can get estimated prices for HDB flats across different towns, flat types, and more.
     """)
     
-    # Main sections in columns
-    col1, col2 = st.columns([3, 2])
+    # Main sections with full width
+    st.markdown("""
+    ### What You Can Do:
     
-    with col1:
-        st.markdown("""
-        ### What You Can Do:
-        
-        **📊 Data Explorer**
-        - Visualize resale price trends over time
-        - Compare prices across different towns and flat types
-        - Explore relationships between property attributes and prices
-        
-        **🔮 Make Prediction**
-        - Input property details to get a predicted resale price
-        - See how changing attributes affects the estimated price
-        
-        **📈 Model Performance**
-        - Compare performance of different prediction models
-        - Understand which features have the most impact on prices
-        - See evaluation metrics for each model
-        """)
-        
-    with col2:
-        # Load a sample visualization or key metrics
-        try:
-            st.image("app/static/singapore_map.jpg", caption="Singapore HDB Towns")
-        except:
-            st.info("Singapore HDB town map visualization")
+    **📊 Data Explorer**
+    - Visualize resale price trends over time
+    - Compare prices across different towns and flat types
+    - Explore relationships between property attributes and prices
     
-    # Dataset overview
+    **🔮 Make Prediction**
+    - Input property details to get a predicted resale price
+    - See how changing attributes affects the estimated price
+    
+    **📈 Model Performance**
+    - Compare performance of different prediction models
+    - Understand which features have the most impact on prices
+    - See evaluation metrics for each model
+    """)
+    
+    # Dataset overview section continues as before...
     st.markdown("---")
     st.markdown("## Dataset Overview")
     
@@ -75,7 +65,7 @@ def show_home():
                 }
             
             # Load data
-            df = pd.read_csv(data_path)
+            df = pd.read_csv(data_path, low_memory=False)
             
             # Calculate statistics
             stats = {
