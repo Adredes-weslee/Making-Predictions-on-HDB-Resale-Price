@@ -6,24 +6,66 @@ features:
   scaling: "standard"  # Options: standard, minmax, robust, none
   feature_selection:
     enabled: true
-    method: "f_regression"  # Options: f_regression, mutual_info, recursive
-    k_best: 20  # Number of top features to select
+    method: "f_regression"
+    percentile: 95   # Number of top features to select
   
-  numerical_features:
-    - "floor_area_sqm"
+    numerical_features:
     - "lease_commence_date"
+    - "Tranc_Year"
+    - "Tranc_Month"
     - "mid_storey"
+    - "lower"
+    - "upper"
+    - "mid"
+    - "hdb_age"
+    - "max_floor_lvl"
+    - "year_completed"
+    - "total_dwelling_units"
+    - "1room_sold"
+    - "2room_sold"
+    - "3room_sold"
+    - "4room_sold"
+    - "5room_sold"
+    - "exec_sold"
+    - "multigen_sold"
+    - "studio_apartment_sold"
+    - "1room_rental"
+    - "2room_rental"
+    - "3room_rental"
+    - "other_room_rental"
     - "Mall_Nearest_Distance"
+    - "Mall_Within_500m"
+    - "Mall_Within_1km"
+    - "Mall_Within_2km"
     - "Hawker_Nearest_Distance"
+    - "Hawker_Within_500m"
+    - "Hawker_Within_1km"
+    - "Hawker_Within_2km"
+    - "hawker_food_stalls"
+    - "hawker_market_stalls"
     - "mrt_nearest_distance"
+    - "bus_interchange"
+    - "mrt_interchange"
+    - "bus_stop_nearest_distance"
     - "pri_sch_nearest_distance"
+    - "vacancy"
+    - "pri_sch_affiliation"
     - "sec_sch_nearest_dist"
+    - "cutoff_point"
+    - "affiliation"
   
   categorical_features:
     - "town"
     - "flat_type"
     - "storey_range"
     - "flat_model"
+    - "full_flat_type"
+    - "residential"
+    - "commercial"
+    - "market_hawker"
+    - "multistorey_carpark"
+    - "precinct_pavilion"
+    - "planning_area"
 
 # Model hyperparameters
 models:
@@ -35,16 +77,16 @@ models:
     alpha: 1.0
     fit_intercept: true
     normalize: false # Deprecated parameter
-    max_iter: 1000
-    tol: 0.001
+    max_iter: 5000
+    tol: 0.01
     solver: "auto"
   
   lasso_regression:
     alpha: 0.01
     fit_intercept: true
     normalize: false # Deprecated parameter
-    max_iter: 1000
-    tol: 0.0001
+    max_iter: 5000
+    tol: 0.001
     warm_start: false
     selection: "cyclic"
 
