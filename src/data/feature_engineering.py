@@ -45,31 +45,60 @@ except ImportError:
 
 
 def get_numeric_features(df: pd.DataFrame) -> List[str]:
-    """Identify numeric features from a DataFrame for feature engineering.
+    """Identify and return numeric features from a DataFrame for feature engineering.
     
-    This function extracts the names of all numeric columns (float and integer types)
-    from the input DataFrame, excluding the target variable 'resale_price' and any
-    non-feature columns like 'id'. The resulting list is used to build feature
-    transformation pipelines that apply appropriate preprocessing to numeric features.
+    This function determines which columns in the DataFrame should be treated as
+    numerical features in the machine learning pipeline. It follows this process:
+    
+    1. First attempts to load predefined numerical features from the feature_selection_config.json
+    2. Validates that the loaded features actually exist in the DataFrame
+    3. If configuration loading fails or no valid features are found, falls back to
+       automatic detection by selecting all float and integer columns (excluding 'id' 
+       and 'resale_price')
+    
+    The function ensures that even if the configuration changes or has errors, a valid
+    set of numerical features will always be returned.
     
     Args:
-        df (pd.DataFrame): Input DataFrame containing both feature and non-feature columns.
+        df (pd.DataFrame): The input DataFrame containing the data features
         
     Returns:
-        List[str]: List of column names corresponding to numeric features that should
-            be used in modeling. Excludes 'id' and 'resale_price' if present.
-            
+        List[str]: List of column names representing numeric features found in the DataFrame
+        
     Example:
-        >>> df = pd.DataFrame({
-        ...     'id': [1, 2, 3],
-        ...     'floor_area_sqm': [70.5, 80.2, 90.0],
-        ...     'storey': [5, 10, 15],
-        ...     'resale_price': [400000, 500000, 600000],
-        ...     'town': ['ANG MO KIO', 'BEDOK', 'CLEMENTI']
-        ... })
-        >>> get_numeric_features(df)
-        ['floor_area_sqm', 'storey']
+        >>> from src.data.loader import load_preprocessed_data
+        >>> df = load_preprocessed_data("data/processed/train.csv")
+        >>> numeric_features = get_numeric_features(df)
+        >>> print(f"Selected {len(numeric_features)} numeric features")
+        
+    Notes:
+        - Target variable 'resale_price' is automatically excluded if present
+        - ID fields are automatically excluded if present
+        - If both configuration-based and automatic detection fail, an empty list is returned
     """
+    try:
+        # First try to load from configuration
+        import json
+        import os
+        from pathlib import Path
+        
+        root_dir = Path(__file__).parent.parent.parent
+        config_path = os.path.join(root_dir, "configs", "feature_selection_config.json")
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                feature_config = json.load(f)
+                numerical_features = feature_config.get("numerical_features", [])
+                
+                # Verify all features exist in the dataframe
+                existing_features = [col for col in numerical_features if col in df.columns]
+                
+                if existing_features:
+                    return existing_features
+    except Exception as e:
+        print(f"Warning: Could not load numerical features from config. Error: {e}")
+    
+    # Fall back to automatic detection if config loading fails
     numeric_features = list(df.select_dtypes(['float','integer']).columns)
     if 'id' in numeric_features:
         numeric_features.remove('id')
@@ -77,33 +106,64 @@ def get_numeric_features(df: pd.DataFrame) -> List[str]:
         numeric_features.remove('resale_price')
     return numeric_features
 
-
 def get_categorical_features(df: pd.DataFrame) -> List[str]:
-    """Identify categorical features from a DataFrame for feature engineering.
+    """Identify and return categorical features from a DataFrame for feature engineering.
     
-    This function extracts the names of all object-type columns from the input DataFrame.
-    These are assumed to be categorical features that require encoding (e.g., one-hot
-    encoding) before they can be used in machine learning models. Common categorical
-    features in HDB data include 'town', 'flat_type', 'storey_range', etc.
+    This function determines which columns in the DataFrame should be treated as
+    categorical features in the machine learning pipeline. It follows this process:
+    
+    1. First attempts to load predefined categorical features from the feature_selection_config.json
+    2. Validates that the loaded features actually exist in the DataFrame
+    3. If configuration loading fails or no valid features are found, falls back to
+       automatic detection by selecting all object and category dtype columns
+    
+    The function prioritizes config-based selection over automatic detection to allow
+    manual control over which features are treated as categorical, while ensuring
+    robustness through fallback mechanisms.
     
     Args:
-        df (pd.DataFrame): Input DataFrame containing both feature and non-feature columns.
+        df (pd.DataFrame): The input DataFrame containing the data features
         
     Returns:
-        List[str]: List of column names corresponding to categorical features that
-            should be used in modeling.
-            
+        List[str]: List of column names representing categorical features found in the DataFrame
+        
     Example:
-        >>> df = pd.DataFrame({
-        ...     'floor_area_sqm': [70.5, 80.2, 90.0],
-        ...     'town': ['ANG MO KIO', 'BEDOK', 'CLEMENTI'],
-        ...     'flat_type': ['3 ROOM', '4 ROOM', '5 ROOM']
-        ... })
-        >>> get_categorical_features(df)
-        ['town', 'flat_type']
+        >>> from src.data.loader import load_preprocessed_data
+        >>> df = load_preprocessed_data("data/processed/train.csv")
+        >>> categorical_features = get_categorical_features(df)
+        >>> print(f"Selected {len(categorical_features)} categorical features:")
+        >>> print(categorical_features[:5])  # Print first 5 categorical features
+        
+    Notes:
+        - High-cardinality columns (with many unique values) will be included if they
+          have object or category dtype, but may need to be carefully handled during
+          feature engineering to avoid dimensionality explosion
+        - If both configuration-based and automatic detection fail, an empty list is returned
     """
-    return list(df.select_dtypes('object').columns)
-
+    try:
+        # First try to load from configuration
+        import json
+        import os
+        from pathlib import Path
+        
+        root_dir = Path(__file__).parent.parent.parent
+        config_path = os.path.join(root_dir, "configs", "feature_selection_config.json")
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                feature_config = json.load(f)
+                categorical_features = feature_config.get("categorical_features", [])
+                
+                # Verify all features exist in the dataframe
+                existing_features = [col for col in categorical_features if col in df.columns]
+                
+                if existing_features:
+                    return existing_features
+    except Exception as e:
+        print(f"Warning: Could not load categorical features from config. Error: {e}")
+    
+    # Fall back to automatic detection
+    return list(df.select_dtypes(['object', 'category']).columns)
 
 def create_preprocessor(
     numeric_features: List[str],
