@@ -62,7 +62,7 @@ def create_date_features(df: pd.DataFrame) -> pd.DataFrame:
     if 'Tranc_YearMonth' in df_copy.columns:
         df_copy['year'] = df_copy['Tranc_YearMonth'].dt.year
         df_copy['month'] = df_copy['Tranc_YearMonth'].dt.month
-        df_copy['quarter'] = df_copy['Tranc_YearMonth'].dt.quarter
+        # df_copy['quarter'] = df_copy['Tranc_YearMonth'].dt.quarter
     
     return df_copy
 
