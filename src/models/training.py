@@ -41,7 +41,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
 from src.data.preprocessing_pipeline import create_standard_preprocessing_pipeline
 from src.data.feature_engineering import get_numeric_features, get_categorical_features
-
+from datetime import datetime
 
 # Define model options
 MODEL_TYPES = {
@@ -172,10 +172,18 @@ def train_and_save_pipeline_model(model_type='linear', data_path=None, model_nam
     # Load training data
     X, y = load_training_data(data_path)
     
+    # Save processed data for consistency across training and prediction
+    from src.data.preprocessing_pipeline import save_processed_data
+    root_dir = Path(__file__).parent.parent.parent
+    processed_data_path = save_processed_data(X, y, 
+        output_path=os.path.join(root_dir, "data", "processed", "train_pipeline_processed.csv"))
+    print(f"Saved processed training data to {processed_data_path}")
+    
     # Split data into train and test sets
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state
     )
+    
     
     # Create preprocessing pipeline
     preprocessor, categorical_features, numerical_features = create_preprocessing_pipeline(
@@ -291,10 +299,25 @@ def train_and_save_pipeline_model(model_type='linear', data_path=None, model_nam
     with open(feature_path, 'w') as f:
         json.dump(feature_info, f)
     
+    # Add this after your feature_info JSON is saved
+    metrics_path = os.path.join(model_dir, f"{model_name}_metrics.json")
+    with open(metrics_path, 'w') as f:
+        # Add a timestamp to the metrics
+        metrics_with_timestamp = {
+            **metrics,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'model_type': model_type,
+            'feature_percentile': feature_percentile
+        }
+        json.dump(metrics_with_timestamp, f, indent=2)
+    print(f"Model metrics saved to {metrics_path}")
+
+    # Update the return value
     return {
         'metrics': metrics,
         'pipeline_path': pipeline_path,
         'feature_info_path': feature_path,
+        'metrics_path': metrics_path,  # Add this line
         'model_type': model_type,
         'feature_count': len(X.columns),
         'training_samples': len(X_train)
