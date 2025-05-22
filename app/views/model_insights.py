@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import plotly.express as px  # For histograms
 from pathlib import Path
 from components.visualizations import (
     plot_model_performance_comparison,
@@ -120,6 +121,85 @@ def show_model_insights():
         
     else:
         st.info("Detailed metrics not available")
+    
+    st.markdown("## Model Coefficient Analysis")
+        
+    # Compare model coefficients to diagnose prediction differences
+    def compare_model_coefficients(models_dict):
+        """Compare coefficients between models to diagnose prediction differences."""
+        for model_type in ['linear', 'ridge', 'lasso']:
+            # Use the correct key that was set in main.py
+            regressor_key = f"{model_type}_regressor"
+            if regressor_key in models_dict and models_dict[regressor_key] is not None:
+                model = models_dict[regressor_key]
+                if hasattr(model, 'coef_'):
+                    # Get coefficient stats
+                    coefs = model.coef_
+                    non_zero = np.sum(coefs != 0)
+                    total = len(coefs)
+                    largest_coef = np.max(np.abs(coefs))
+                    
+                    st.subheader(f"{model_type.capitalize()} Model")
+                    
+                    # Create columns for metrics
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Non-zero Coefficients", f"{non_zero}/{total}")
+                    col2.metric("Sparsity", f"{(total-non_zero)/total:.1%}")
+                    col3.metric("Largest Coefficient", f"{largest_coef:.2f}")
+                    
+                    # Create histogram of coefficients
+                    fig = px.histogram(
+                        x=coefs, 
+                        nbins=50,
+                        title=f"{model_type.capitalize()} Coefficient Distribution",
+                        labels={"x": "Coefficient Value", "y": "Count"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning(f"{model_type} model has no coefficients available")
+            else:
+                st.warning(f"{model_type} regressor not found in models")
+        
+    # Call the function
+    compare_model_coefficients(models_dict)
+
+    # Add explanation
+    st.markdown("""
+    **What this analysis tells you:**
+    - **Non-zero coefficients:** Models with more non-zero coefficients use more features for prediction
+    - **Sparsity:** Lasso typically has higher sparsity (more zeros) due to L1 regularization
+    - **Distribution:** Shows how coefficient values are distributed (many small vs few large values)
+
+    Different coefficient patterns explain why models might give different predictions for the same input.
+""")
+    
+    # Calculate correlation between model coefficients
+    if all(f"{m}_regressor" in models_dict and models_dict[f"{m}_regressor"] is not None for m in ['ridge', 'linear', 'lasso']):
+        st.markdown("### Coefficient Correlation Between Models")
+        
+        # Get coefficients for all models
+        ridge_coefs = models_dict["ridge_regressor"].coef_
+        linear_coefs = models_dict["linear_regressor"].coef_
+        lasso_coefs = models_dict["lasso_regressor"].coef_
+        
+        # Create correlation matrix
+        corr_matrix = np.corrcoef([ridge_coefs, linear_coefs, lasso_coefs])
+        corr_df = pd.DataFrame(
+            corr_matrix, 
+            columns=["Ridge", "Linear", "Lasso"],
+            index=["Ridge", "Linear", "Lasso"]
+        )
+        
+        # Format to percentage
+        formatted_corr = corr_df.applymap(lambda x: f"{x:.1%}")
+        st.dataframe(formatted_corr)
+        
+        st.markdown("""
+        **Coefficient correlation** shows how similar the feature importance patterns are between models.
+        Low correlation between Lasso and other models explains prediction differences!
+        """)
+    else:
+        st.warning("Not all model regressors are available for correlation analysis")
     
     # Model methodology
     st.markdown("## Methodology")
