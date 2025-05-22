@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
+import plotly.express as px
 from components.visualizations import (
     plot_price_distribution,
     plot_price_trends,
@@ -33,8 +34,17 @@ def load_exploratory_data():
             st.error(f"Processed data not found at {data_path}")
             return None
         
-        # Load data
-        df = pd.read_csv(data_path)
+        # Load data with low_memory=False to avoid mixed type warnings
+        df = pd.read_csv(data_path, low_memory=False)
+        
+        # Create year_month column from Tranc_Year and Tranc_Month if they exist
+        if 'Tranc_Year' in df.columns and 'Tranc_Month' in df.columns:
+            # Convert to strings first with zero padding for months
+            df['year_month'] = pd.to_datetime(
+                df['Tranc_Year'].astype(str) + '-' + 
+                df['Tranc_Month'].astype(str).str.zfill(2) + '-01'
+            )
+        
         return df
         
     except Exception as e:
@@ -58,24 +68,25 @@ def show_data_explorer():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if 'towns' in st.session_state:
-                towns = st.session_state.towns
+            if 'town' in df.columns:
+                towns = sorted(df['town'].unique())
                 selected_towns = st.multiselect(
                     "Select Towns",
                     options=towns,
                     default=towns[:5] if len(towns) > 5 else towns,
-                    key="explorer_towns"  # Add this unique key
+                    key="explorer_towns"
                 )
             else:
                 selected_towns = None
         
         with col2:
-            if 'flat_types' in st.session_state:
-                flat_types = st.session_state.flat_types
+            if 'flat_type' in df.columns:
+                flat_types = sorted(df['flat_type'].unique())
                 selected_flat_types = st.multiselect(
                     "Flat Types",
                     options=flat_types,
-                    default=flat_types
+                    default=flat_types,
+                    key="explorer_flat_types"
                 )
             else:
                 selected_flat_types = None
@@ -86,12 +97,14 @@ def show_data_explorer():
                 start_date = st.selectbox(
                     "Start Date",
                     options=year_months,
-                    index=0
+                    index=0,
+                    key="explorer_start_date"
                 )
                 end_date = st.selectbox(
                     "End Date",
                     options=year_months,
-                    index=len(year_months)-1
+                    index=len(year_months)-1,
+                    key="explorer_end_date"
                 )
             else:
                 start_date = None
@@ -100,10 +113,10 @@ def show_data_explorer():
     # Apply filters
     filtered_df = df.copy()
     
-    if selected_towns:
+    if selected_towns and 'town' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['town'].isin(selected_towns)]
         
-    if selected_flat_types:
+    if selected_flat_types and 'flat_type' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['flat_type'].isin(selected_flat_types)]
         
     if start_date and end_date and 'year_month' in filtered_df.columns:
@@ -136,25 +149,60 @@ def show_data_explorer():
     with tab2:
         # Price trends over time
         st.markdown("### Resale Price Trends")
+        
+        # Try using our custom plot_price_trends first
         trends_fig = plot_price_trends(filtered_df)
         if trends_fig:
             st.plotly_chart(trends_fig, use_container_width=True)
         else:
-            st.info("Price trend data not available")
+            # Custom implementation for when the standard function fails
+            if 'year_month' in filtered_df.columns:
+                # Group by month and calculate average price
+                monthly_avg = filtered_df.groupby(pd.Grouper(key='year_month', freq='M'))['resale_price'].mean().reset_index()
+                monthly_avg['year_month'] = monthly_avg['year_month'].dt.strftime('%Y-%m')
+                
+                # Create interactive line chart
+                fig = px.line(
+                    monthly_avg, 
+                    x='year_month', 
+                    y='resale_price',
+                    title="Average Resale Price Over Time",
+                    labels={'year_month': 'Month', 'resale_price': 'Average Price (SGD)'}
+                )
+                fig.update_traces(mode='lines+markers')
+                fig.update_layout(yaxis_tickprefix='$', yaxis_tickformat=',')
+                st.plotly_chart(fig, use_container_width=True)
+            elif 'Tranc_Year' in filtered_df.columns:
+                # Fallback to just using years
+                yearly_avg = filtered_df.groupby('Tranc_Year')['resale_price'].mean().reset_index()
+                yearly_avg.columns = ['Year', 'Average Price']
+                
+                fig = px.bar(
+                    yearly_avg, 
+                    x='Year', 
+                    y='Average Price',
+                    title="Average Resale Price by Year",
+                    labels={'Year': 'Year', 'Average Price': 'Average Price (SGD)'}
+                )
+                fig.update_layout(yaxis_tickprefix='$', yaxis_tickformat=',')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Price trend data not available")
             
     with tab3:
         # Price by categorical features
         st.markdown("### Resale Price by Feature")
         
         # Feature selector
-        categorical_features = ['town', 'flat_type', 'storey_range', 'flat_model']
+        categorical_features = ['town', 'flat_type', 'storey_range', 'flat_model', 'full_flat_type']
         available_features = [f for f in categorical_features if f in filtered_df.columns]
         
         if available_features:
             selected_feature = st.selectbox(
                 "Select Feature",
                 options=available_features,
-                index=0
+                index=0,
+                key="explorer_feature"
             )
             
             # Box plot
@@ -180,7 +228,8 @@ def show_data_explorer():
             selected_num_features = st.multiselect(
                 "Select Features for Correlation Analysis",
                 options=numerical_cols,
-                default=numerical_cols[:10] if len(numerical_cols) > 10 else numerical_cols
+                default=numerical_cols[:10] if len(numerical_cols) > 10 else numerical_cols,
+                key="explorer_corr_features"
             )
             
             if selected_num_features and len(selected_num_features) >= 2:
