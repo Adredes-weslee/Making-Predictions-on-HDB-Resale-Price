@@ -79,15 +79,55 @@ def load_models():
                 if os.path.exists(model_path):
                     # Store with both keys for compatibility
                     pipeline = joblib.load(model_path)
-                    models[f"{model_type}_pipeline"] = pipeline  # Key for make_prediction function
-                    models[f"{model_type}_model"] = pipeline     # Keep original key for backward compatibility
+                    models[f"{model_type}_pipeline"] = pipeline
+                    models[f"{model_type}_model"] = pipeline
                     logger.info(f"Loaded {model_type} model successfully")
+                    
+                    # DEBUG: Print pipeline structure
+                    if hasattr(pipeline, 'named_steps'):
+                        logger.info(f"{model_type} pipeline steps: {list(pipeline.named_steps.keys())}")
+                        
+                        # Try different common step names
+                        possible_step_names = ['regressor', 'classifier', 'model', model_type, 'estimator']
+                        actual_model = None
+                        
+                        for step_name in possible_step_names:
+                            if step_name in pipeline.named_steps:
+                                actual_model = pipeline.named_steps[step_name]
+                                logger.info(f"Found model in step '{step_name}' for {model_type}")
+                                break
+                        
+                        # If no standard name found, try the last step
+                        if actual_model is None:
+                            step_names = list(pipeline.named_steps.keys())
+                            if step_names:
+                                last_step_name = step_names[-1]
+                                actual_model = pipeline.named_steps[last_step_name]
+                                logger.info(f"Using last step '{last_step_name}' as model for {model_type}")
+                        
+                        if actual_model is not None:
+                            models[f"{model_type}_regressor"] = actual_model
+                            logger.info(f"{model_type} regressor extracted. Has coef_: {hasattr(actual_model, 'coef_')}")
+                            if hasattr(actual_model, 'coef_'):
+                                logger.info(f"{model_type} coefficient shape: {actual_model.coef_.shape}")
+                        else:
+                            logger.warning(f"Could not extract regressor from {model_type} pipeline")
+                            models[f"{model_type}_regressor"] = None
+                    else:
+                        # Pipeline doesn't have named_steps, might be the model itself
+                        if hasattr(pipeline, 'coef_'):
+                            models[f"{model_type}_regressor"] = pipeline
+                            logger.info(f"{model_type} model is not a pipeline, using directly")
+                        else:
+                            logger.warning(f"{model_type} is neither a pipeline nor has coefficients")
+                            models[f"{model_type}_regressor"] = None
+                        
                 else:
                     logger.warning(f"Model file not found: {model_path}")
                     models[f"{model_type}_pipeline"] = None
                     models[f"{model_type}_model"] = None
+                    models[f"{model_type}_regressor"] = None
                 
-                # Rest of the loading code remains the same
                 # Load metrics
                 metrics_path = os.path.join(models_dir, f"pipeline_{model_type}_model_metrics.json")
                 if os.path.exists(metrics_path):
@@ -110,6 +150,7 @@ def load_models():
                 logger.error(f"Error loading {model_type} model: {str(e)}")
                 models[f"{model_type}_pipeline"] = None
                 models[f"{model_type}_model"] = None
+                models[f"{model_type}_regressor"] = None
                 models[f"{model_type}_metrics"] = None
                 models[f"{model_type}_features"] = None
         
@@ -119,7 +160,7 @@ def load_models():
         logger.error(f"Error in load_models: {str(e)}")
         st.error(f"Failed to load models: {str(e)}")
         return {}
-
+    
 def main():
     """Main function to run the Streamlit app."""
     try:
