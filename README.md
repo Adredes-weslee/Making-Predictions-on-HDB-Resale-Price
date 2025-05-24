@@ -87,7 +87,7 @@ Experience the application: [HDB Price Predictor Dashboard](https://adredes-wesl
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/Making-Predictions-on-HDB-Resale-Price.git
+git clone https://github.com/Adredes-weslee/Making-Predictions-on-HDB-Resale-Price.git
 cd Making-Predictions-on-HDB-Resale-Price
 ```
 
