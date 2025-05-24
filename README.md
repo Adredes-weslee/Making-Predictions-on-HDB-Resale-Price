@@ -1,9 +1,12 @@
 # HDB Resale Price Predictor 🏠
 *From Research to Production: A User-Centric Singapore Public Housing Price Prediction Application*
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://adredes-weslee-making-predictions-on-hdb-resale-pric-app-iwznz4.streamlit.app)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Streamlit 1.45.0](https://img.shields.io/badge/Streamlit-1.45.0-FF4B4B.svg)](https://streamlit.io/)
+[![Pandas 2.2.3](https://img.shields.io/badge/Pandas-2.2.3-150458.svg)](https://pandas.pydata.org/)
+[![Scikit-learn 1.6.1](https://img.shields.io/badge/Scikit--learn-1.6.1-F7931E.svg)](https://scikit-learn.org/)
+[![Matplotlib 3.10.1](https://img.shields.io/badge/Matplotlib-3.10.1-11557c.svg)](https://matplotlib.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎯 Project Overview
 
@@ -383,7 +386,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Wes Lee**  
 📍 Singapore  
 🔗 [LinkedIn](https://www.linkedin.com/in/wes-lee)  
-📧 [Contact](mailto:your.email@example.com)
+📧 [Contact](mailto:weslee.qb@gmail.com)
 
 ---
 
