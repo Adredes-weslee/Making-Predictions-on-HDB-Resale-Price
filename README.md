@@ -8,6 +8,11 @@ The repo is organized around a user-facing dashboard, not just a standalone ML s
 ![Python](https://img.shields.io/badge/Python-Regression_Pipeline-3776AB?style=flat-square&logo=python&logoColor=white) ![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=flat-square&logo=streamlit&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-Modeling-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)
 
 [![Portfolio Article](https://img.shields.io/badge/Portfolio%20Article-102A43?style=flat-square)](https://adredes-weslee.github.io/data-science/machine-learning/real-estate/2023/06/18/predicting-hdb-resale-prices.html) [![Live Demo](https://img.shields.io/badge/Live%20Demo-FF8B2B?style=flat-square)](https://adredes-weslee-making-predictions-on-hdb-resale-pric-app-iwznz4.streamlit.app/)
+
+## Interface Preview
+
+![Interface preview](docs/screenshots/app-overview.png)
+
 ## Quickstart
 
 ```bash

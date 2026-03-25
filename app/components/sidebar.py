@@ -13,7 +13,8 @@ def create_sidebar():
         str: The selected page name
     """
     with st.sidebar:
-        st.title("HDB Resale Price Predictor")
+        st.title("HDB resale price predictor")
+        st.caption("Start on Home for market context, then move to Data Explorer or Make Prediction.")
         
         # Main navigation
         if "page" not in st.session_state:
@@ -22,14 +23,8 @@ def create_sidebar():
             "Navigation",
             ["Home", "Data Explorer", "Make Prediction", "Model Performance"],
             index=0,  # Default to Home
-            format_func=lambda x: f"📊 {x}" if x == "Data Explorer" else
-                              f"🔮 {x}" if x == "Make Prediction" else
-                              f"📈 {x}" if x == "Model Performance" else
-                              f"🏠 {x}",
             key="page"
         )
-        
-        st.sidebar.markdown("---")
         
         # # Add global filters if needed (town, flat type, etc.)
         # if selected_page in ["Data Explorer", "Model Performance"]:
@@ -63,11 +58,10 @@ def create_sidebar():
         # Information about the model
         st.sidebar.markdown("---")
         st.sidebar.info(
-            """
-            **About this app**  
-            
-            This app helps you explore HDB resale prices and make predictions based on property attributes.
-            """
+            "First steps\n\n"
+            "1. Review the market snapshot on Home.\n"
+            "2. Inspect trends in Data Explorer.\n"
+            "3. Use Make Prediction for a single-flat estimate."
         )
         
         # Footer

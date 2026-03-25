@@ -171,8 +171,19 @@ def load_train_test_data(
     try:
         # Try to load from processed data first
         processed_dir = data_paths["processed"]
-        processed_file = os.path.join(processed_dir, "train_processed.csv")
-        df = load_raw_data(processed_file)
+        candidate_files = [
+            "train_processed.csv",
+            "train_processed_exploratory.csv",
+            "train_pipeline_processed.csv",
+        ]
+        df = None
+        for filename in candidate_files:
+            processed_file = os.path.join(processed_dir, filename)
+            if os.path.exists(processed_file):
+                df = load_raw_data(processed_file)
+                break
+        if df is None:
+            raise FileNotFoundError("No processed training dataset found.")
     except FileNotFoundError:
         # Fall back to raw data if needed
         df = load_raw_data(data_paths["train"])

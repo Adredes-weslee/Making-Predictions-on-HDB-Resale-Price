@@ -12,7 +12,7 @@ The application includes the following main sections:
 4. Model Insights - Analysis of model performance and feature importance
 
 Typical usage:
-    $ streamlit run app/main.py
+    $ streamlit run app.py
 """
 import streamlit as st
 import pandas as pd
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Set page configuration
 st.set_page_config(
     page_title="HDB Resale Price Predictor",
-    page_icon="🏙️",
+    page_icon=":classical_building:",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -49,7 +49,7 @@ st.markdown("""
     <style>
     .main-header {
         font-size: 2.5rem;
-        color: #1E88E5;
+        color: #102A43;
     }
     </style>
 """, unsafe_allow_html=True)
