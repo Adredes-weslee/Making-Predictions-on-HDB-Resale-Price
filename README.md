@@ -4,6 +4,22 @@ A Streamlit app for Singapore HDB resale price exploration and point prediction,
 
 The repo is organized around a user-facing dashboard, not just a standalone ML script.
 
+<!-- README_SURFACE_START -->
+![Python](https://img.shields.io/badge/Python-Regression_Pipeline-3776AB?style=flat-square&logo=python&logoColor=white) ![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=flat-square&logo=streamlit&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-Modeling-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)
+
+[![Portfolio Article](https://img.shields.io/badge/Portfolio%20Article-102A43?style=flat-square)](https://adredes-weslee.github.io/data-science/machine-learning/real-estate/2023/06/18/predicting-hdb-resale-prices.html) [![Live Demo](https://img.shields.io/badge/Live%20Demo-FF8B2B?style=flat-square)](https://adredes-weslee-making-predictions-on-hdb-resale-pric-app-iwznz4.streamlit.app/)
+## Quickstart
+
+```bash
+conda env create -f environment.yaml
+python scripts/verify_environment.py
+streamlit run app.py
+```
+
+See [Setup and Run](#setup-and-run) for the full environment and verification path.
+
+<!-- README_SURFACE_END -->
+
 ## Why This Repository Exists
 
 - Estimate HDB resale prices from features a buyer can realistically provide: town, flat type/model, storey range, floor area, lease year, nearby amenities, school proximity, and transaction date.
